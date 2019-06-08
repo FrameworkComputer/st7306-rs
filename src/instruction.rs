@@ -1,17 +1,7 @@
-/// System function command.
-pub struct Command {
-    /// Instruction to be executed.
-    pub instruction: Instruction,
-
-    /// List of arguments.
-    pub arguments: Vec<u8>,
-
-    /// Delay after command is executed.
-    pub delay: Option<u64>,
-}
+use num_derive::ToPrimitive;
 
 /// ST7735 instructions.
-#[derive(FromPrimitive, ToPrimitive)]
+#[derive(ToPrimitive)]
 pub enum Instruction {
     NOP = 0x00,
     SWRESET = 0x01,
