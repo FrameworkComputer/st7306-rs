@@ -34,6 +34,9 @@ where
 
     /// 5Hz timer for reset delays
     timer: TIMER, 
+
+    /// Whether the display is RGB (true) or BGR (false)
+    rgb: bool,
 }
 
 /// Display orientation.
@@ -58,6 +61,7 @@ where
         dc: DC,
         rst: RST,
         timer: TIMER,
+        rgb: bool,
     ) -> Self 
     where
         SPI: spi::Write<u8>,
@@ -70,6 +74,7 @@ where
             dc, 
             rst,
             timer,
+            rgb,
         };
 
         display
@@ -130,7 +135,15 @@ where
     }
 
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
-        self.write_command(Instruction::MADCTL, Some(&[orientation.to_u8().unwrap()]))?;
+        if self.rgb {
+            self.write_command(
+                Instruction::MADCTL, Some(&[orientation.to_u8().unwrap()]
+            ))?;
+        } else {
+            self.write_command(
+                Instruction::MADCTL, Some(&[orientation.to_u8().unwrap() | 0x08 ]
+            ))?;
+        }
         Ok(())
     }
 

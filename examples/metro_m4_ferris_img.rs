@@ -51,7 +51,7 @@ fn main() -> ! {
     );
     timer.start(5.hz());
 
-    let mut disp = st7735_lcd::ST7735::new(spi, dc, rst, timer);
+    let mut disp = st7735_lcd::ST7735::new(spi, dc, rst, timer, false);
     disp.init().unwrap();
     disp.set_orientation(&Orientation::Landscape).unwrap();
 
