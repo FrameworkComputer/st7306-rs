@@ -37,6 +37,9 @@ where
 
     /// Whether the display is RGB (true) or BGR (false)
     rgb: bool,
+
+    /// Whether the colours are inverted (true) or not (false)
+    inverted: bool,
 }
 
 /// Display orientation.
@@ -62,6 +65,7 @@ where
         rst: RST,
         timer: TIMER,
         rgb: bool,
+        inverted: bool,
     ) -> Self 
     where
         SPI: spi::Write<u8>,
@@ -75,6 +79,7 @@ where
             rst,
             timer,
             rgb,
+            inverted,
         };
 
         display
@@ -98,8 +103,16 @@ where
         self.write_command(Instruction::PWCTR4, Some(&[0x8A, 0x2A]))?;
         self.write_command(Instruction::PWCTR5, Some(&[0x8A, 0xEE]))?;
         self.write_command(Instruction::VMCTR1, Some(&[0x0E]))?;
-        self.write_command(Instruction::INVON, None)?;
-        self.write_command(Instruction::MADCTL, Some(&[0x00]))?;
+        if self.inverted {
+            self.write_command(Instruction::INVON, None)?;
+        } else {
+            self.write_command(Instruction::INVOFF, None)?;
+        }
+        if self.rgb {
+            self.write_command(Instruction::MADCTL, Some(&[0x00]))?;
+        } else {
+            self.write_command(Instruction::MADCTL, Some(&[0x08]))?;
+        }
         self.write_command(Instruction::COLMOD, Some(&[0x05]))?;
         self.write_command(Instruction::DISPON, None)?;
         block!(self.timer.wait()).map_err(|_|())?;
