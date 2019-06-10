@@ -1,7 +1,7 @@
 [package]
 name = "st7735-lcd"
 description = "ST7735 TFT LCD driver with embedded-graphics support"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Paul Sajna <sajattack@gmail.com>"]
 edition = "2018"
 license = "MIT"
@@ -28,7 +28,6 @@ version = "0.4"
 [dev-dependencies]
 metro_m4 = "0.1"
 panic-halt = "0.2"
-#pygamer = "0.1" 
 
 [features]
 default = ["graphics"]

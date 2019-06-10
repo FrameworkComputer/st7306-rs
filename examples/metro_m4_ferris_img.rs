@@ -12,12 +12,13 @@ use embedded_graphics::primitives::Rect;
 use hal::spi_master;
 use hal::prelude::*;
 use hal::clock::GenericClockController;
-use hal::{entry, Peripherals};
+use hal::{entry, Peripherals, CorePeripherals};
 use st7735_lcd;
 use st7735_lcd::Orientation;
 
 #[entry]
 fn main() -> ! {
+    let core = CorePeripherals::take().unwrap();
     let mut peripherals = Peripherals::take().unwrap();
     let mut clocks = GenericClockController::with_external_32kosc(
         peripherals.GCLK,
@@ -42,17 +43,10 @@ fn main() -> ! {
     
     let dc = pins.d0.into_push_pull_output(&mut pins.port);
     let rst = pins.d1.into_push_pull_output(&mut pins.port);
-    let gclk0 = clocks.gclk0();
-    let timer_clock = clocks.tc2_tc3(&gclk0).unwrap();
-    let mut timer = hal::timer::TimerCounter::tc3_(
-        &timer_clock,
-        peripherals.TC3,
-        &mut peripherals.MCLK
-    );
-    timer.start(5.hz());
+    let mut delay = hal::delay::Delay::new(core.SYST, &mut clocks);
 
-    let mut disp = st7735_lcd::ST7735::new(spi, dc, rst, timer, false, true);
-    disp.init().unwrap();
+    let mut disp = st7735_lcd::ST7735::new(spi, dc, rst, false, true);
+    disp.init(&mut delay).unwrap();
     disp.set_orientation(&Orientation::Landscape).unwrap();
 
     // There's a translation here because my particular lcd seems to be off a few pixels

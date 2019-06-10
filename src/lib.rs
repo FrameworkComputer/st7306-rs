@@ -12,16 +12,14 @@ use num_derive::ToPrimitive;
 
 use embedded_hal::digital::OutputPin;
 use embedded_hal::blocking::spi;
-use embedded_hal::timer::{CountDown, Periodic};
-use nb::block;
+use embedded_hal::blocking::delay::DelayMs;
 
 /// ST7735 driver to connect to TFT displays. 
-pub struct ST7735 <SPI, DC, RST, TIMER> 
+pub struct ST7735 <SPI, DC, RST> 
 where 
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
-    TIMER: CountDown + Periodic,
 {
     /// SPI
     spi: SPI, 
@@ -31,9 +29,6 @@ where
 
     /// Reset pin.
     rst: RST, 
-
-    /// 5Hz timer for reset delays
-    timer: TIMER, 
 
     /// Whether the display is RGB (true) or BGR (false)
     rgb: bool,
@@ -51,33 +46,25 @@ pub enum Orientation {
     LandscapeSwapped = 0xA0,
 }
 
-impl<SPI, DC, RST, TIMER> ST7735<SPI, DC, RST, TIMER>
+impl<SPI, DC, RST> ST7735<SPI, DC, RST>
 where 
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
-    TIMER: CountDown + Periodic,
 {
     /// Creates a new driver instance that uses hardware SPI.
     pub fn new(
         spi: SPI,
         dc: DC,
         rst: RST,
-        timer: TIMER,
         rgb: bool,
         inverted: bool,
     ) -> Self 
-    where
-        SPI: spi::Write<u8>,
-        DC: OutputPin,
-        RST: OutputPin,
-        TIMER: CountDown + Periodic,
     {
         let display = ST7735 {
             spi,
             dc, 
             rst,
-            timer,
             rgb,
             inverted,
         };
@@ -86,12 +73,14 @@ where
     }
 
     /// Runs commands to initialize the display.
-    pub fn init(&mut self) -> Result<(), ()> {
+    pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+        where DELAY: DelayMs<u8>
+    {
         self.hard_reset();
         self.write_command(Instruction::SWRESET, None)?;
-        block!(self.timer.wait()).map_err(|_|())?;
+        delay.delay_ms(200);
         self.write_command(Instruction::SLPOUT, None)?;
-        block!(self.timer.wait()).map_err(|_|())?;
+        delay.delay_ms(200);
         self.write_command(Instruction::FRMCTR1, Some(&[0x01, 0x2C, 0x2D]))?;
         self.write_command(Instruction::FRMCTR2, Some(&[0x01, 0x2C, 0x2D]))?;
         self.write_command(Instruction::FRMCTR3,
@@ -115,7 +104,7 @@ where
         }
         self.write_command(Instruction::COLMOD, Some(&[0x05]))?;
         self.write_command(Instruction::DISPON, None)?;
-        block!(self.timer.wait()).map_err(|_|())?;
+        delay.delay_ms(200);
         Ok(())
     }
 
@@ -187,12 +176,11 @@ extern crate embedded_graphics;
 use self::embedded_graphics::{drawable, pixelcolor::PixelColorU16, Drawing};
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, RST, TIMER> Drawing<PixelColorU16> for ST7735<SPI, DC, RST, TIMER>
+impl<SPI, DC, RST> Drawing<PixelColorU16> for ST7735<SPI, DC, RST>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
-    TIMER: CountDown + Periodic,
 {
     fn draw<T>(&mut self, item_pixels: T)
     where
