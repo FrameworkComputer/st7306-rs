@@ -10,7 +10,7 @@ use crate::instruction::Instruction;
 use num_traits::ToPrimitive;
 use num_derive::ToPrimitive;
 
-use embedded_hal::digital::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::blocking::spi;
 use embedded_hal::blocking::delay::DelayMs;
 
@@ -76,7 +76,7 @@ where
     pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
         where DELAY: DelayMs<u8>
     {
-        self.hard_reset();
+        self.hard_reset()?;
         self.write_command(Instruction::SWRESET, None)?;
         delay.delay_ms(200);
         self.write_command(Instruction::SLPOUT, None)?;
@@ -108,14 +108,16 @@ where
         Ok(())
     }
 
-    pub fn hard_reset(&mut self) {
-        self.rst.set_high();
-        self.rst.set_low();
-        self.rst.set_high();
+    pub fn hard_reset(&mut self) -> Result<(), ()>
+    {
+        self.rst.set_high().map_err(|_| ())?;
+        self.rst.set_low().map_err(|_| ())?;
+        self.rst.set_high().map_err(|_| ())?;
+        Ok(())
     }
 
     fn write_command(&mut self, command: Instruction, params: Option<&[u8]>) -> Result<(), ()> {
-        self.dc.set_low();
+        self.dc.set_low().map_err(|_| ())?;
         self.spi.write(&[command.to_u8().unwrap()]).map_err(|_| ())?;
         if params.is_some() {
             self.write_data(params.unwrap())?;
@@ -124,7 +126,7 @@ where
     }
 
     fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
-        self.dc.set_high();
+        self.dc.set_high().map_err(|_| ())?;
         self.spi.write(data).map_err(|_| ())?;
         Ok(())
     }
