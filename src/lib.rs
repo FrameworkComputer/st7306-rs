@@ -14,21 +14,21 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::blocking::spi;
 use embedded_hal::blocking::delay::DelayMs;
 
-/// ST7735 driver to connect to TFT displays. 
-pub struct ST7735 <SPI, DC, RST> 
-where 
+/// ST7735 driver to connect to TFT displays.
+pub struct ST7735 <SPI, DC, RST>
+where
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
 {
     /// SPI
-    spi: SPI, 
+    spi: SPI,
 
     /// Data/command pin.
-    dc: DC, 
+    dc: DC,
 
     /// Reset pin.
-    rst: RST, 
+    rst: RST,
 
     /// Whether the display is RGB (true) or BGR (false)
     rgb: bool,
@@ -47,7 +47,7 @@ pub enum Orientation {
 }
 
 impl<SPI, DC, RST> ST7735<SPI, DC, RST>
-where 
+where
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
@@ -59,11 +59,11 @@ where
         rst: RST,
         rgb: bool,
         inverted: bool,
-    ) -> Self 
+    ) -> Self
     {
         let display = ST7735 {
             spi,
-            dc, 
+            dc,
             rst,
             rgb,
             inverted,
@@ -175,10 +175,10 @@ where
 #[cfg(feature = "graphics")]
 extern crate embedded_graphics;
 #[cfg(feature = "graphics")]
-use self::embedded_graphics::{drawable, pixelcolor::PixelColorU16, Drawing};
+use self::embedded_graphics::{drawable, pixelcolor::Rgb565, Drawing};
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, RST> Drawing<PixelColorU16> for ST7735<SPI, DC, RST>
+impl<SPI, DC, RST> Drawing<Rgb565> for ST7735<SPI, DC, RST>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -186,10 +186,10 @@ where
 {
     fn draw<T>(&mut self, item_pixels: T)
     where
-        T: Iterator<Item = drawable::Pixel<PixelColorU16>>,
+        T: IntoIterator<Item = drawable::Pixel<Rgb565>>,
     {
         for pixel in item_pixels {
-            self.set_pixel((pixel.0).0 as u16, (pixel.0).1 as u16, pixel.1.into_inner()).expect("pixel write failed");
+            self.set_pixel((pixel.0).0 as u16, (pixel.0).1 as u16, (pixel.1).0).expect("pixel write failed");
         }
     }
 }
