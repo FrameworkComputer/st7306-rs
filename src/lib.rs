@@ -112,8 +112,7 @@ where
     {
         self.rst.set_high().map_err(|_| ())?;
         self.rst.set_low().map_err(|_| ())?;
-        self.rst.set_high().map_err(|_| ())?;
-        Ok(())
+        self.rst.set_high().map_err(|_| ())
     }
 
     fn write_command(&mut self, command: Instruction, params: Option<&[u8]>) -> Result<(), ()> {
@@ -127,15 +126,13 @@ where
 
     fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
         self.dc.set_high().map_err(|_| ())?;
-        self.spi.write(data).map_err(|_| ())?;
-        Ok(())
+        self.spi.write(data).map_err(|_| ())
     }
 
     /// Writes a data word to the display.
     fn write_word(&mut self, value: u16) -> Result<(), ()> {
         let bytes: [u8; 2] = unsafe { transmute(value.to_be()) };
-        self.write_data(&bytes)?;
-        Ok(())
+        self.write_data(&bytes)
     }
 
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
@@ -152,30 +149,43 @@ where
     }
 
     /// Sets the address window for the display.
-    fn set_address_window(&mut self, x: u16, y: u16, w: u16, h: u16) -> Result<(), ()> {
+    fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
         self.write_command(Instruction::CASET, None)?;
-        self.write_word(x)?;
-        self.write_word(w)?;
+        self.write_word(sx)?;
+        self.write_word(ex)?;
         self.write_command(Instruction::RASET, None)?;
-        self.write_word(y)?;
-        self.write_word(h)?;
-        Ok(())
+        self.write_word(sy)?;
+        self.write_word(ey)
     }
 
+    /// Sets a pixel color at the given coords.
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u16) -> Result <(), ()> {
         self.set_address_window(x, y, x, y)?;
         self.write_command(Instruction::RAMWR, None)?;
-        self.write_word(color)?;
+        self.write_word(color)
+    }
+
+    /// Writes pixel colors sequentially into the current drawing window
+    pub fn write_pixels<P: IntoIterator<Item = u16>>(&mut self, colors: P) -> Result <(), ()> {
+        self.write_command(Instruction::RAMWR, None)?;
+        for color in colors {
+            self.write_word(color)?;
+        }
         Ok(())
     }
 
+    /// Sets pixel colors at the given drawing window
+    pub fn set_pixels<P: IntoIterator<Item = u16>>(&mut self, sx: u16, sy: u16, ex: u16, ey: u16, colors: P) -> Result <(), ()> {
+        self.set_address_window(sx, sy, ex, ey)?;
+        self.write_pixels(colors)
+    }
 }
 
 
 #[cfg(feature = "graphics")]
 extern crate embedded_graphics;
 #[cfg(feature = "graphics")]
-use self::embedded_graphics::{drawable, pixelcolor::Rgb565, Drawing};
+use self::embedded_graphics::{drawable::{Pixel, Dimensions}, pixelcolor::Rgb565, Drawing, SizedDrawing};
 
 #[cfg(feature = "graphics")]
 impl<SPI, DC, RST> Drawing<Rgb565> for ST7735<SPI, DC, RST>
@@ -186,10 +196,31 @@ where
 {
     fn draw<T>(&mut self, item_pixels: T)
     where
-        T: IntoIterator<Item = drawable::Pixel<Rgb565>>,
+        T: IntoIterator<Item = Pixel<Rgb565>>,
     {
-        for pixel in item_pixels {
-            self.set_pixel((pixel.0).0 as u16, (pixel.0).1 as u16, (pixel.1).0).expect("pixel write failed");
+        for Pixel(coord, color) in item_pixels {
+            self.set_pixel(coord.0 as u16, coord.1 as u16, color.0).expect("pixel write failed");
         }
+    }
+}
+
+#[cfg(feature = "graphics")]
+impl<SPI, DC, RST> SizedDrawing<Rgb565> for ST7735<SPI, DC, RST>
+where
+    SPI: spi::Write<u8>,
+    DC: OutputPin,
+    RST: OutputPin,
+{
+    fn draw_sized<T>(&mut self, item_pixels: T)
+    where
+        T: IntoIterator<Item = Pixel<Rgb565>> + Dimensions,
+    {
+        // Get bounding box `Coord`s as `(u32, u32)`
+        let top_left = item_pixels.top_left();
+        let bottom_right = item_pixels.bottom_right();
+
+        self.set_pixels(top_left.0 as u16, top_left.1 as u16,
+                        bottom_right.0 as u16, bottom_right.1 as u16,
+                        item_pixels.into_iter().map(|Pixel(_coord, color)| color.0)).expect("pixels write failed")
     }
 }
