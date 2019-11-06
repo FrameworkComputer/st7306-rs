@@ -48,9 +48,10 @@ fn main() -> ! {
     let mut disp = st7735_lcd::ST7735::new(spi, dc, rst, false, true);
     disp.init(&mut delay).unwrap();
     disp.set_orientation(&Orientation::Landscape).unwrap();
+    // My particular lcd seems to be off a few pixels
+    disp.set_offset(1, 25);
 
-    // There's a translation here because my particular lcd seems to be off a few pixels
-    let black_backdrop: Rect<PixelColorU16> = Rect::new(Coord::new(0, 0), Coord::new(160, 80)).with_fill(Some(0x0000u16.into())).translate(Coord::new(1, 25));
+    let black_backdrop: Rect<PixelColorU16> = Rect::new(Coord::new(0, 0), Coord::new(160, 80)).with_fill(Some(0x0000u16.into()));
 
     disp.draw(black_backdrop.into_iter());
     

@@ -35,6 +35,10 @@ where
 
     /// Whether the colours are inverted (true) or not (false)
     inverted: bool,
+
+    /// Global image offset
+    dx: u16,
+    dy: u16,
 }
 
 /// Display orientation.
@@ -67,6 +71,8 @@ where
             rst,
             rgb,
             inverted,
+            dx: 0,
+            dy: 0
         };
 
         display
@@ -148,14 +154,20 @@ where
         Ok(())
     }
 
+    /// Sets the global offset of the displayed image
+    pub fn set_offset(&mut self, dx: u16, dy: u16) {
+        self.dx = dx;
+        self.dy = dy;
+    }
+
     /// Sets the address window for the display.
     fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
         self.write_command(Instruction::CASET, None)?;
-        self.write_word(sx)?;
-        self.write_word(ex)?;
+        self.write_word(sx + self.dx)?;
+        self.write_word(ex + self.dx)?;
         self.write_command(Instruction::RASET, None)?;
-        self.write_word(sy)?;
-        self.write_word(ey)
+        self.write_word(sy + self.dy)?;
+        self.write_word(ey + self.dy)
     }
 
     /// Sets a pixel color at the given coords.
