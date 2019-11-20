@@ -1,6 +1,6 @@
 name: Rust
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
@@ -8,8 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Install Target
+      run: rustup target install thumbv7em-none-eabihf
     - uses: actions/checkout@v1
     - name: Build
-      run: cargo build --release --examples --target=thumbv7em-none-eabi
+      run: cargo build --release --examples --target=thumbv7em-none-eabihf
     - name: Run tests
       run: cargo test --verbose
