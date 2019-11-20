@@ -6,8 +6,7 @@ extern crate metro_m4 as hal;
 
 use embedded_graphics::image::Image16BPP;
 use embedded_graphics::prelude::*;
-use embedded_graphics::pixelcolor::PixelColorU16;
-use embedded_graphics::primitives::Rect;
+use embedded_graphics::primitives::rectangle::Rectangle;
 
 use hal::spi_master;
 use hal::prelude::*;
@@ -51,7 +50,7 @@ fn main() -> ! {
     // My particular lcd seems to be off a few pixels
     disp.set_offset(1, 25);
 
-    let black_backdrop: Rect<PixelColorU16> = Rect::new(Coord::new(0, 0), Coord::new(160, 80)).with_fill(Some(0x0000u16.into()));
+    let black_backdrop = Rectangle::new(Coord::new(0, 0), Coord::new(160, 80)).fill(Some(0x0000u16.into()));
 
     disp.draw(black_backdrop.into_iter());
     
