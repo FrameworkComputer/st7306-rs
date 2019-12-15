@@ -37,6 +37,8 @@ where
     /// Global image offset
     dx: u16,
     dy: u16,
+    width: u32,
+    height: u32,
 }
 
 /// Display orientation.
@@ -55,7 +57,15 @@ where
     RST: OutputPin,
 {
     /// Creates a new driver instance that uses hardware SPI.
-    pub fn new(spi: SPI, dc: DC, rst: RST, rgb: bool, inverted: bool) -> Self {
+    pub fn new(
+        spi: SPI,
+        dc: DC,
+        rst: RST,
+        rgb: bool,
+        inverted: bool,
+        width: u32,
+        height: u32,
+    ) -> Self {
         let display = ST7735 {
             spi,
             dc,
@@ -64,6 +74,8 @@ where
             inverted,
             dx: 0,
             dy: 0,
+            width,
+            height,
         };
 
         display
@@ -205,51 +217,30 @@ where
 extern crate embedded_graphics;
 #[cfg(feature = "graphics")]
 use self::embedded_graphics::{
-    drawable::{Dimensions, Pixel},
-    pixelcolor::Rgb565,
-    Drawing, SizedDrawing,
+    drawable::Pixel,
+    pixelcolor::{
+        raw::{RawData, RawU16},
+        Rgb565,
+    },
+    prelude::*,
+    DrawTarget,
 };
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, RST> Drawing<Rgb565> for ST7735<SPI, DC, RST>
+impl<SPI, DC, RST> DrawTarget<Rgb565> for ST7735<SPI, DC, RST>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
     RST: OutputPin,
 {
-    fn draw<T>(&mut self, item_pixels: T)
-    where
-        T: IntoIterator<Item = Pixel<Rgb565>>,
-    {
-        for Pixel(coord, color) in item_pixels {
-            self.set_pixel(coord.0 as u16, coord.1 as u16, color.0)
-                .expect("pixel write failed");
-        }
+    type Error = ();
+
+    fn draw_pixel(&mut self, pixel: Pixel<Rgb565>) -> Result<(), Self::Error> {
+        let Pixel(Point { x, y }, color) = pixel;
+        self.set_pixel(x as u16, y as u16, RawU16::from(color).into_inner())
     }
-}
 
-#[cfg(feature = "graphics")]
-impl<SPI, DC, RST> SizedDrawing<Rgb565> for ST7735<SPI, DC, RST>
-where
-    SPI: spi::Write<u8>,
-    DC: OutputPin,
-    RST: OutputPin,
-{
-    fn draw_sized<T>(&mut self, item_pixels: T)
-    where
-        T: IntoIterator<Item = Pixel<Rgb565>> + Dimensions,
-    {
-        // Get bounding box `Coord`s as `(u32, u32)`
-        let top_left = item_pixels.top_left();
-        let bottom_right = item_pixels.bottom_right();
-
-        self.set_pixels(
-            top_left.0 as u16,
-            top_left.1 as u16,
-            bottom_right.0 as u16,
-            bottom_right.1 as u16,
-            item_pixels.into_iter().map(|Pixel(_coord, color)| color.0),
-        )
-        .expect("pixels write failed")
+    fn size(&self) -> Size {
+        Size::new(self.width, self.height)
     }
 }

@@ -23,7 +23,7 @@ default-features = false
 
 [dependencies.embedded-graphics]
 optional = true
-version = "0.5"
+version = "0.6.0"
 
 [features]
 default = ["graphics"]
