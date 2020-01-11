@@ -4,8 +4,6 @@
 
 pub mod instruction;
 
-use core::mem::transmute;
-
 use crate::instruction::Instruction;
 use num_traits::ToPrimitive;
 use num_derive::ToPrimitive;
@@ -137,8 +135,7 @@ where
 
     /// Writes a data word to the display.
     fn write_word(&mut self, value: u16) -> Result<(), ()> {
-        let bytes: [u8; 2] = unsafe { transmute(value.to_be()) };
-        self.write_data(&bytes)
+        self.write_data(&value.to_be_bytes())
     }
 
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
