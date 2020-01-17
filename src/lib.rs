@@ -4,8 +4,6 @@
 
 pub mod instruction;
 
-use core::mem::transmute;
-
 use crate::instruction::Instruction;
 use num_traits::ToPrimitive;
 use num_derive::ToPrimitive;
@@ -125,20 +123,23 @@ where
         self.dc.set_low().map_err(|_| ())?;
         self.spi.write(&[command.to_u8().unwrap()]).map_err(|_| ())?;
         if params.is_some() {
+            self.start_data()?;
             self.write_data(params.unwrap())?;
         }
         Ok(())
     }
 
+    fn start_data(&mut self) -> Result<(), ()> {
+        self.dc.set_high().map_err(|_| ())
+    }
+
     fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
-        self.dc.set_high().map_err(|_| ())?;
         self.spi.write(data).map_err(|_| ())
     }
 
     /// Writes a data word to the display.
     fn write_word(&mut self, value: u16) -> Result<(), ()> {
-        let bytes: [u8; 2] = unsafe { transmute(value.to_be()) };
-        self.write_data(&bytes)
+        self.write_data(&value.to_be_bytes())
     }
 
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
@@ -163,9 +164,11 @@ where
     /// Sets the address window for the display.
     fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
         self.write_command(Instruction::CASET, None)?;
+        self.start_data()?;
         self.write_word(sx + self.dx)?;
         self.write_word(ex + self.dx)?;
         self.write_command(Instruction::RASET, None)?;
+        self.start_data()?;
         self.write_word(sy + self.dy)?;
         self.write_word(ey + self.dy)
     }
@@ -174,12 +177,14 @@ where
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u16) -> Result <(), ()> {
         self.set_address_window(x, y, x, y)?;
         self.write_command(Instruction::RAMWR, None)?;
+        self.start_data()?;
         self.write_word(color)
     }
 
     /// Writes pixel colors sequentially into the current drawing window
     pub fn write_pixels<P: IntoIterator<Item = u16>>(&mut self, colors: P) -> Result <(), ()> {
         self.write_command(Instruction::RAMWR, None)?;
+        self.start_data()?;
         for color in colors {
             self.write_word(color)?;
         }
