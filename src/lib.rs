@@ -86,7 +86,7 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        self.hard_reset()?;
+        self.hard_reset(delay)?;
         self.write_command(Instruction::SWRESET, None)?;
         delay.delay_ms(200);
         self.write_command(Instruction::SLPOUT, None)?;
@@ -120,9 +120,14 @@ where
         Ok(())
     }
 
-    pub fn hard_reset(&mut self) -> Result<(), ()> {
+    pub fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    where
+        DELAY: DelayMs<u8>,
+    {
         self.rst.set_high().map_err(|_| ())?;
+        delay.delay_ms(10);
         self.rst.set_low().map_err(|_| ())?;
+        delay.delay_ms(10);
         self.rst.set_high().map_err(|_| ())
     }
 
