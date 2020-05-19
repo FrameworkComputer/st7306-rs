@@ -156,6 +156,22 @@ where
         self.write_data(&value.to_be_bytes())
     }
 
+    fn write_words_buffered(&mut self, words: impl IntoIterator<Item = u16>) -> Result<(), ()>{
+        let mut buffer = [0; 32];
+        let mut index = 0;
+        for word in words {
+            let as_bytes = word.to_be_bytes();
+            buffer[index] = as_bytes[0];
+            buffer[index+1] = as_bytes[1];
+            index += 2;
+            if index >= buffer.len() {
+                self.write_data(&buffer);
+                index = 0;
+            }
+        }
+        self.write_data(&buffer[0..index])
+    }
+
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
         if self.rgb {
             self.write_command(Instruction::MADCTL, Some(&[orientation.to_u8().unwrap()]))?;
@@ -203,6 +219,11 @@ where
         }
         Ok(())
     }
+    pub fn write_pixels_buffered<P: IntoIterator<Item = u16>>(&mut self, colors: P) -> Result<(), ()> {
+        self.write_command(Instruction::RAMWR, None)?;
+        self.start_data()?;
+        self.write_words_buffered(colors)
+    }
 
     /// Sets pixel colors at the given drawing window
     pub fn set_pixels<P: IntoIterator<Item = u16>>(
@@ -216,6 +237,18 @@ where
         self.set_address_window(sx, sy, ex, ey)?;
         self.write_pixels(colors)
     }
+
+    pub fn set_pixels_buffered<P: IntoIterator<Item = u16>>(
+        &mut self,
+        sx: u16,
+        sy: u16,
+        ex: u16,
+        ey: u16,
+        colors: P,
+    ) -> Result<(), ()> {
+        self.set_address_window(sx, sy, ex, ey)?;
+        self.write_pixels_buffered(colors)
+    }
 }
 
 #[cfg(feature = "graphics")]
@@ -227,6 +260,9 @@ use self::embedded_graphics::{
         raw::{RawData, RawU16},
         Rgb565,
     },
+    primitives::Rectangle,
+    style::{Styled, PrimitiveStyle},
+    image::Image,
     prelude::*,
     DrawTarget,
 };
@@ -243,6 +279,83 @@ where
     fn draw_pixel(&mut self, pixel: Pixel<Rgb565>) -> Result<(), Self::Error> {
         let Pixel(Point { x, y }, color) = pixel;
         self.set_pixel(x as u16, y as u16, RawU16::from(color).into_inner())
+    }
+
+    fn draw_rectangle(
+        &mut self,
+        item: &Styled<Rectangle, PrimitiveStyle<Rgb565>>
+    ) -> Result<(), Self::Error> {
+        let shape = item.primitive;
+        let rect_width = shape.bottom_right.x - item.primitive.top_left.x;
+        let rect_height = shape.bottom_right.y - item.primitive.top_left.y;
+        let rect_size = rect_width * rect_height;
+
+        match (item.style.fill_color, item.style.stroke_color) {
+            (Some(fill), None) => {
+                let color = RawU16::from(fill).into_inner();
+                let iter = (0..rect_size).map(move |_| color);
+                self.set_pixels_buffered(
+                    shape.top_left.x as u16,
+                    shape.top_left.y as u16,
+                    shape.bottom_right.x as u16,
+                    shape.bottom_right.y as u16,
+                    iter,
+                )
+            },
+            (Some(fill), Some(stroke)) => {
+                let fill_color = RawU16::from(fill).into_inner();
+                let stroke_color = RawU16::from(stroke).into_inner();
+                let iter = (0..rect_size).map(move |i| {
+                    if i % rect_width <= item.style.stroke_width as i32
+                    || i % rect_width >= rect_width - item.style.stroke_width as i32
+                    || i <= item.style.stroke_width as i32 * rect_width
+                    || i >= (rect_height - item.style.stroke_width as i32) * rect_width
+                    {
+                        stroke_color
+                    }
+                    else {
+                        fill_color
+                    }
+                });
+                self.set_pixels_buffered(
+                    shape.top_left.x as u16,
+                    shape.top_left.y as u16,
+                    shape.bottom_right.x as u16,
+                    shape.bottom_right.y as u16,
+                    iter,
+                )
+            },
+            // TODO: Draw edges as subrectangles
+            (None, Some(_)) => {
+                self.draw_iter(item)
+            }
+            (None, None) => {
+                self.draw_iter(item)
+            }
+        }
+    }
+
+    fn draw_image<'a, 'b, I>(
+        &mut self,
+        item: &'a Image<'b, I, Rgb565>
+    ) -> Result<(), Self::Error>
+    where
+        &'b I: IntoPixelIter<Rgb565>,
+        I: ImageDimensions,
+    {
+        let sx = item.top_left().x as u16;
+        let sy = item.top_left().y as u16;
+        let ex = item.bottom_right().x as u16;
+        let ey = item.bottom_right().y as u16;
+        // -1 is required because image gets skewed if it is not present
+        // NOTE: Is this also required for draw_rect?
+        self.set_pixels_buffered(
+            sx,
+            sy,
+            ex-1,
+            ey-1,
+            item.into_iter().map(|p| RawU16::from(p.1).into_inner()),
+        )
     }
 
     fn size(&self) -> Size {
