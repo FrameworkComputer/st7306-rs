@@ -286,8 +286,8 @@ where
         item: &Styled<Rectangle, PrimitiveStyle<Rgb565>>
     ) -> Result<(), Self::Error> {
         let shape = item.primitive;
-        let rect_width = shape.bottom_right.x - item.primitive.top_left.x;
-        let rect_height = shape.bottom_right.y - item.primitive.top_left.y;
+        let rect_width = shape.bottom_right.x - item.primitive.top_left.x + 1;
+        let rect_height = shape.bottom_right.y - item.primitive.top_left.y +1;
         let rect_size = rect_width * rect_height;
 
         match (item.style.fill_color, item.style.stroke_color) {
