@@ -1,6 +1,6 @@
 #![no_std]
 
-//! This crate provides a ST7735 driver to connect to TFT displays.
+//! This crate provides a ST7306 driver to connect to TFT displays.
 
 pub mod instruction;
 
@@ -26,9 +26,6 @@ where
     /// Reset pin.
     rst: RST,
 
-    /// Whether the display is RGB (true) or BGR (false)
-    rgb: bool,
-
     /// Whether the colours are inverted (true) or not (false)
     inverted: bool,
 
@@ -40,6 +37,21 @@ where
 }
 
 /// Display orientation.
+/// Bits:
+/// 0: 0
+/// 1: 0
+/// 2: Gate Scan Order, 0==Refresh Top to Bottom
+/// 3: Data Output Order, 0==Left To Right
+/// 4: 0
+/// 5: Page/Column Order, 0==Column Direction, 1==Page Direction
+/// 6: Column Address Order, 0=Left to Right
+/// 7: Page Address Order, 0==Top to Bottom
+/// bin(0x00) = '0b00000000' Portrait
+/// bin(0xC0) = '0b11000000' Portrait Swapped
+///
+/// bin(0x60) = '0b01100000' Landscape
+/// bin(0xA0) = '0b10100000' Landscape Swapped
+
 #[derive(Clone, Copy)]
 pub enum Orientation {
     Portrait = 0x00,
@@ -59,7 +71,6 @@ where
         spi: SPI,
         dc: DC,
         rst: RST,
-        rgb: bool,
         inverted: bool,
         width: u32,
         height: u32,
@@ -68,7 +79,6 @@ where
             spi,
             dc,
             rst,
-            rgb,
             inverted,
             dx: 0,
             dy: 0,
@@ -78,9 +88,8 @@ where
 
         display
     }
-
     /// Runs commands to initialize the display.
-    pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    pub fn init_st7306<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
     {
@@ -89,29 +98,115 @@ where
         delay.delay_ms(200);
         self.write_command(Instruction::SLPOUT, &[])?;
         delay.delay_ms(200);
-        self.write_command(Instruction::FRMCTR1, &[0x01, 0x2C, 0x2D])?;
-        self.write_command(Instruction::FRMCTR2, &[0x01, 0x2C, 0x2D])?;
-        self.write_command(Instruction::FRMCTR3, &[0x01, 0x2C, 0x2D, 0x01, 0x2C, 0x2D])?;
-        self.write_command(Instruction::INVCTR, &[0x07])?;
-        self.write_command(Instruction::PWCTR1, &[0xA2, 0x02, 0x84])?;
-        self.write_command(Instruction::PWCTR2, &[0xC5])?;
-        self.write_command(Instruction::PWCTR3, &[0x0A, 0x00])?;
-        self.write_command(Instruction::PWCTR4, &[0x8A, 0x2A])?;
-        self.write_command(Instruction::PWCTR5, &[0x8A, 0xEE])?;
-        self.write_command(Instruction::VMCTR1, &[0x0E])?;
-        if self.inverted {
-            self.write_command(Instruction::INVON, &[])?;
-        } else {
+
+        self.write_command(Instruction::NVMLOADCTRL, &[0x17, 0x02])?;
+        self.write_command(Instruction::BSTEN, &[0x01])?;
+        self.write_command(Instruction::GCTRL, &[0x0E, 0x0A])?;
+        self.write_command(Instruction::VSHPCTRL, &[0x41, 0x41, 0x41, 0x41])?;
+        self.write_command(Instruction::VSLPCTRL, &[0x32, 0x32, 0x32, 0x32,])?;
+        self.write_command(Instruction::VSHNCTRL, &[0x46, 0x46, 0x46, 0x46])?;
+        self.write_command(Instruction::VSLNCTRL, &[0x46, 0x46, 0x46, 0x46])?;
+        self.write_command(Instruction::FRCTRL, &[0x02])?;
+        self.write_command(Instruction::GTUPEQH, &[0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45])?;
+        self.write_command(Instruction::GTUPEQL, &[0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45])?;
+        self.write_command(Instruction::GTCON, &[0x32, 0x03, 0x1F])?;
+        self.write_command(Instruction::SOUEQ, &[0x13])?;
+        self.write_command(Instruction::GATESET, &[0x78])?;
+        self.write_command(Instruction::SLPOUT, &[])?;
+        delay.delay_ms(120);
+        self.write_command(Instruction::OSCSET, &[0xA6, 0xE9])?;
+        self.write_command(Instruction::VSHLSEL, &[0x00])?;
+        self.write_command(Instruction::MADCTL, &[0x48])?;
+        self.write_command(Instruction::DTFORM, &[0x10])?;
+        self.write_command(Instruction::GAMAMS, &[0x20])?;
+        self.write_command(Instruction::PNLSET, &[0x00])?;
+        self.write_command(Instruction::CASET, &[0x00, 0x3B])?;
+        self.write_command(Instruction::RASET, &[0x00, 0xEF])?;
+        //self.write_command(Instruction::TEON, &[0x00])?;
+        self.write_command(Instruction::AUSOPWRCTRL, &[0xFF])?;
+        self.write_command(Instruction::HPM, &[])?;
+
+        //if self.inverted {
+        //    self.write_command(Instruction::INVON, &[])?;
+        //} else {
             self.write_command(Instruction::INVOFF, &[])?;
-        }
-        if self.rgb {
-            self.write_command(Instruction::MADCTL, &[0x00])?;
-        } else {
-            self.write_command(Instruction::MADCTL, &[0x08])?;
-        }
-        self.write_command(Instruction::COLMOD, &[0x05])?;
+        //}
+
         self.write_command(Instruction::DISPON, &[])?;
-        delay.delay_ms(200);
+
+        Ok(())
+    }
+
+    pub fn sleep_in<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    where
+        DELAY: DelayMs<u8>,
+    {
+        // TODO: Detect if HPM or LPM
+        if true {//mode == HPM {
+            self.write_command(Instruction::SLPIN, &[])?;
+            delay.delay_ms(100);
+        } else {
+            self.write_command(Instruction::HPM, &[])?;
+            delay.delay_ms(200);
+            self.sleep_in(delay)?;
+        }
+        Ok(())
+    }
+
+    pub fn sleep_out<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    where
+        DELAY: DelayMs<u8>,
+    {
+        self.write_command(Instruction::SLPOUT, &[])?;
+        delay.delay_ms(100);
+        Ok(())
+    }
+
+    pub fn switch_mode<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    where
+        DELAY: DelayMs<u8>,
+    {
+        // TODO: !!!
+        self.write_command(Instruction::HPM, &[])?;
+        self.write_command(Instruction::LPM, &[])?;
+        delay.delay_ms(100);
+        Ok(())
+    }
+
+    /// Runs commands to initialize the display.
+    pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    where
+        DELAY: DelayMs<u8>,
+    {
+        self.init_st7306(delay)?;
+        //self.hard_reset(delay)?;
+        //self.write_command(Instruction::SWRESET, &[])?;
+        //delay.delay_ms(200);
+        //self.write_command(Instruction::SLPOUT, &[])?;
+        //delay.delay_ms(200);
+        //self.write_command(Instruction::FRMCTR1, &[0x01, 0x2C, 0x2D])?;
+        //self.write_command(Instruction::FRMCTR2, &[0x01, 0x2C, 0x2D])?;
+        //self.write_command(Instruction::FRMCTR3, &[0x01, 0x2C, 0x2D, 0x01, 0x2C, 0x2D])?;
+        //self.write_command(Instruction::INVCTR, &[0x07])?;
+        //self.write_command(Instruction::PWCTR1, &[0xA2, 0x02, 0x84])?;
+        //self.write_command(Instruction::PWCTR2, &[0xC5])?;
+        //self.write_command(Instruction::PWCTR3, &[0x0A, 0x00])?;
+        //self.write_command(Instruction::PWCTR4, &[0x8A, 0x2A])?;
+        //self.write_command(Instruction::PWCTR5, &[0x8A, 0xEE])?;
+        //self.write_command(Instruction::VMCTR1, &[0x0E])?;
+        //if self.inverted {
+        //    self.write_command(Instruction::INVON, &[])?;
+        //} else {
+        //    self.write_command(Instruction::INVOFF, &[])?;
+        //}
+        //if self.rgb {
+        //    self.write_command(Instruction::MADCTL, &[0x00])?;
+        //} else {
+        //    self.write_command(Instruction::MADCTL, &[0x08])?;
+        //}
+        //self.write_command(Instruction::COLMOD, &[0x05])?;
+        //self.write_command(Instruction::DISPON, &[])?;
+        //delay.delay_ms(200);
         Ok(())
     }
 
@@ -119,6 +214,7 @@ where
     where
         DELAY: DelayMs<u8>,
     {
+        // TODO: Check if same
         self.rst.set_high().map_err(|_| ())?;
         delay.delay_ms(10);
         self.rst.set_low().map_err(|_| ())?;
@@ -127,6 +223,7 @@ where
     }
 
     fn write_command(&mut self, command: Instruction, params: &[u8]) -> Result<(), ()> {
+        // TODO: Check if same
         self.dc.set_low().map_err(|_| ())?;
         self.spi.write(&[command as u8]).map_err(|_| ())?;
         if !params.is_empty() {
@@ -166,11 +263,8 @@ where
     }
 
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
-        if self.rgb {
-            self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
-        } else {
-            self.write_command(Instruction::MADCTL, &[*orientation as u8 | 0x08])?;
-        }
+        // TODO: Check if same
+        self.write_command(Instruction::MADCTL, &[*orientation as u8 | 0x08])?;
         Ok(())
     }
 
@@ -182,6 +276,7 @@ where
 
     /// Sets the address window for the display.
     pub fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
+        // TODO: Check if same
         self.write_command(Instruction::CASET, &[])?;
         self.start_data()?;
         self.write_word(sx + self.dx)?;
@@ -194,6 +289,7 @@ where
 
     /// Sets a pixel color at the given coords.
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u16) -> Result<(), ()> {
+        // TODO: Check if same
         self.set_address_window(x, y, x, y)?;
         self.write_command(Instruction::RAMWR, &[])?;
         self.start_data()?;
@@ -202,6 +298,7 @@ where
 
     /// Writes pixel colors sequentially into the current drawing window
     pub fn write_pixels<P: IntoIterator<Item = u16>>(&mut self, colors: P) -> Result<(), ()> {
+        // TODO: Check if same
         self.write_command(Instruction::RAMWR, &[])?;
         self.start_data()?;
         for color in colors {
@@ -258,6 +355,7 @@ use self::embedded_graphics::{
 };
 
 #[cfg(feature = "graphics")]
+// TODO: Remove color support from here
 impl<SPI, DC, RST> DrawTarget for ST7735<SPI, DC, RST>
 where
     SPI: spi::Write<u8>,
