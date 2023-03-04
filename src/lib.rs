@@ -8,13 +8,14 @@ use crate::instruction::Instruction;
 
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
-use embedded_hal::spi::FullDuplex;
+use embedded_hal::blocking::spi;
 
 /// ST7735 driver to connect to TFT displays.
-pub struct ST7735<SPI, DC, RST>
+pub struct ST7735<SPI, DC, CS, RST>
 where
-    SPI: FullDuplex<u8>,
+    SPI: spi::Write<u8>,
     DC: OutputPin,
+    CS: OutputPin,
     RST: OutputPin,
 {
     /// SPI
@@ -22,6 +23,9 @@ where
 
     /// Data/command pin.
     pub dc: DC,
+
+    /// Chip select pin
+    pub cs: CS,
 
     /// Reset pin.
     pub rst: RST,
@@ -60,17 +64,19 @@ pub enum Orientation {
     LandscapeSwapped = 0xA0,
 }
 
-impl<SPI, DC, RST> ST7735<SPI, DC, RST>
+impl<SPI, DC, CS, RST> ST7735<SPI, DC, CS, RST>
 where
-    SPI: FullDuplex<u8>,
+    SPI: spi::Write<u8>,
     DC: OutputPin,
+    CS: OutputPin,
     RST: OutputPin,
 {
     /// Creates a new driver instance that uses hardware SPI.
-    pub fn new(spi: SPI, dc: DC, rst: RST, inverted: bool, width: u32, height: u32) -> Self {
+    pub fn new(spi: SPI, dc: DC, cs: CS, rst: RST, inverted: bool, width: u32, height: u32) -> Self {
         let display = ST7735 {
             spi,
             dc,
+            cs,
             rst,
             inverted,
             dx: 0,
@@ -127,7 +133,7 @@ where
     //    DELAY: DelayMs<u8>,
     //{
     //    self.dc.set_low().map_err(|_| ())?;
-    //    self.spi.send(command as u8).map_err(|_| ())?;
+    //    self.spi.write(command as u8).map_err(|_| ())?;
     //    let res = self.spi.read().map_err(|_| ())?;
     //    Ok(res)
     //}
@@ -143,58 +149,91 @@ where
 
         self.write_command(Instruction::NVMLOADCTRL, &[0x17, 0x02])?;
         self.write_command(Instruction::BSTEN, &[0x01])?;
-        self.write_command(Instruction::GCTRL, &[0x0E, 0x0A])?;
-        self.write_command(Instruction::VSHPCTRL, &[0x41, 0x41, 0x41, 0x41])?;
-        self.write_command(Instruction::VSLPCTRL, &[0x32, 0x32, 0x32, 0x32])?;
-        self.write_command(Instruction::VSHNCTRL, &[0x46, 0x46, 0x46, 0x46])?;
-        self.write_command(Instruction::VSLNCTRL, &[0x46, 0x46, 0x46, 0x46])?;
-        self.write_command(Instruction::FRCTRL, &[0x02])?;
+        // datasheet: 0x0E, 0x0A, reference: 0x08, 0x02
+        self.write_command(Instruction::GCTRL, &[0x08, 0x02])?;
+        self.write_command(Instruction::VSHPCTRL, &[0x0B, 0x0B, 0x0B, 0x0B])?;
+        self.write_command(Instruction::VSLPCTRL, &[0x23, 0x23, 0x23, 0x23])?;
+        self.write_command(Instruction::VSHNCTRL, &[0x27, 0x27, 0x27, 0x27])?;
+        self.write_command(Instruction::VSLNCTRL, &[0x35, 0x35, 0x35, 0x35])?;
+
+        // Datasheet: 0x32, 0x03, 0x1F Reference code: not present
+        //self.write_command(Instruction::GTCON, &[0x32, 0x03, 0x1F])?;
+
+        // Datasheet: 0x26, 0xE9, Reference: 0xA6, 0xE9
+        self.write_command(Instruction::OSCSET, &[0xA6, 0xE9])?;
+        // Datasheet: 0x02. Reference: 0x12
+        self.write_command(Instruction::FRCTRL, &[0x12])?;
+
+        // Datasheet: 0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
+        // Reference: 0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
         self.write_command(
             Instruction::GTUPEQH,
             &[0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45],
         )?;
+        // Datasheet: 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
+        // Reference: 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
         self.write_command(
             Instruction::GTUPEQL,
             &[0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45],
         )?;
-        self.write_command(Instruction::GTCON, &[0x32, 0x03, 0x1F])?;
+        // Datasheet: 0x13, Reference: 0x13
         self.write_command(Instruction::SOUEQ, &[0x13])?;
-        // Default: 0x78, manual example: 0x78
-        self.write_command(Instruction::GATESET, &[0x78])?;
+        // Datasheet: 0x78, Reference: 0x64 (100) 300x400 Mono
+        self.write_command(Instruction::GATESET, &[0x64])?;
+
         self.write_command(Instruction::SLPOUT, &[])?;
-        delay.delay_ms(120);
-        self.write_command(Instruction::OSCSET, &[0xA6, 0xE9])?;
-        // Default: 0x00, manual example: 0x00
+        delay.delay_ms(255);
+
+        // Ultra low power
+        self.write_command(Instruction::LOWPOWER, &[0xC1, 0x4A, 0x26])?;
+
+        // Default: 0x00, reference code: 0x00
         self.write_command(Instruction::VSHLSEL, &[0x00])?;
-        // Default 0x00, manual example: 0x48/0b1001000 (MY, DO)
+
+        // Default 0x00, manual example: 0x48/0b1001000 (MY, DO), reference code: 0x00
         // 0b1001000 =      MY, DO
         // 0b0001000 =        , DO
         // 0b1001100 =      MY, DO,    GS (Seems to make it start rom the top)
         // 0b1011000 =    , MY, DO, MV
         self.write_command(Instruction::MADCTL, &[0x00])?;
-        // Default: 0x00, manual example: 0x10. bit 0 to enable BPS
-        self.write_command(Instruction::DTFORM, &[0x01])?;
-        // Default: 0x20
+
+        // Default: 0x00, reference code: 0x10. bit 0 to enable BPS
+        self.write_command(Instruction::DTFORM, &[0x11])?;
+
+        // Default: 0x20, reference code: 0x20
         self.write_command(Instruction::GAMAMS, &[0x20])?;
-        // Default: 0xA0, manual example: 0x00
-        self.write_command(Instruction::PNLSET, &[0xA0])?;
+
+        // Default: 0x0A, manual example: 0b10001001(0x89), reference code: 0x29
+        self.write_command(Instruction::PNLSET, &[0x29])?;
 
         // Will be overridden by each pixel write
-        self.write_command(Instruction::CASET, &[0x00, 0x3B])?;
-        self.write_command(Instruction::RASET, &[0x00, 0xEF])?;
+        // Columns 18-42 (S217-S516)
+        self.write_command(Instruction::CASET, &[0x12, 0x2A])?;
+        // Rows 0-199 (G1-G402)
+        self.write_command(Instruction::RASET, &[0x00, 0xC7])?;
 
-        //self.write_command(Instruction::TEON, &[0x00])?;
-        // Default: off
+        // Enable auto power down
         self.write_command(Instruction::AUSOPWRCTRL, &[0xFF])?;
-        self.write_command(Instruction::HPM, &[])?;
 
+        // Tearing enable on
+        self.write_command(Instruction::TEON, &[])?;
+
+        // Default: off, Reference code: On
+        self.write_command(Instruction::AUSOPWRCTRL, &[0xFF])?;
+
+        // Reference mode goes into LPM here, hmm
+        self.write_command(Instruction::LPM, &[])?;
+
+        // Works
         //if self.inverted {
         //    self.write_command(Instruction::INVON, &[])?;
         //} else {
-            self.write_command(Instruction::INVOFF, &[])?;
+        //    self.write_command(Instruction::INVON, &[])?;
         //}
 
         self.write_command(Instruction::DISPON, &[])?;
+
+        delay.delay_ms(255);
 
         Ok(())
     }
@@ -295,31 +334,34 @@ where
 
     pub fn write_command(&mut self, command: Instruction, params: &[u8]) -> Result<(), ()> {
         // TODO: Check if same
+        self.cs.set_low().map_err(|_| ())?;
         self.dc.set_low().map_err(|_| ())?;
-        self.spi.send(command as u8).map_err(|_| ())?;
+        self.spi.write(&[command as u8]).map_err(|_| ())?;
         if !params.is_empty() {
             self.start_data()?;
             self.write_data(params)?;
         }
+        self.cs.set_high().map_err(|_| ())?;
         Ok(())
     }
 
     pub fn start_data(&mut self) -> Result<(), ()> {
-        // TODO: Check if same
+        self.cs.set_low().map_err(|_| ())?;
         self.dc.set_high().map_err(|_| ())
+    }
+    pub fn end_data(&mut self) -> Result<(), ()> {
+        self.cs.set_high().map_err(|_| ())?;
+        self.dc.set_low().map_err(|_| ())
     }
 
     pub fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
         // TODO: Check if same
+            self.cs.set_low();
         data.iter().for_each(|d| {
-            self.spi.send(*d);
+            self.spi.write(&[*d as u8]);
         });
+            self.cs.set_high();
         Ok(())
-    }
-
-    pub fn read_data(&mut self, data: &[u8]) -> Result<u8, ()> {
-        // TODO: Check if same
-        self.spi.read().map_err(|_| ())
     }
 
     /// Writes a data word to the display.
@@ -499,10 +541,11 @@ fn col_to_bright(color: Rgb565) -> u8 {
 
 #[cfg(feature = "graphics")]
 // TODO: Remove color support from here
-impl<SPI, DC, RST> DrawTarget for ST7735<SPI, DC, RST>
+impl<SPI, DC, CS, RST> DrawTarget for ST7735<SPI, DC, CS, RST>
 where
-    SPI: FullDuplex<u8>,
+    SPI: spi::Write<u8>,
     DC: OutputPin,
+    CS: OutputPin,
     RST: OutputPin,
 {
     type Error = ();
@@ -576,10 +619,11 @@ where
 }
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, RST> OriginDimensions for ST7735<SPI, DC, RST>
+impl<SPI, DC, CS, RST> OriginDimensions for ST7735<SPI, DC, CS, RST>
 where
-    SPI: FullDuplex<u8>,
+    SPI: spi::Write<u8>,
     DC: OutputPin,
+    CS: OutputPin,
     RST: OutputPin,
 {
     fn size(&self) -> Size {

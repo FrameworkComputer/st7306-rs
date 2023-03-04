@@ -79,6 +79,8 @@ pub enum Instruction {
     VSHNCTRL = 0xC4,
     /// Source Low Negative Voltage Control
     VSLNCTRL = 0xC5,
+    /// Ultra low power (Undocumented)
+    LOWPOWER = 0xC7,
     /// Source Gamma Voltage Control
     VSIKCTRL = 0xC8,
     /// Source Voltage Select
