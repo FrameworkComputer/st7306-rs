@@ -224,12 +224,12 @@ where
         // Reference mode goes into LPM here, hmm
         self.write_command(Instruction::LPM, &[])?;
 
-        // Works
-        //if self.inverted {
-        //    self.write_command(Instruction::INVON, &[])?;
-        //} else {
-        //    self.write_command(Instruction::INVON, &[])?;
-        //}
+        // Invert screen colors
+        if self.inverted {
+            self.write_command(Instruction::INVON, &[])?;
+        } else {
+            self.write_command(Instruction::INVON, &[])?;
+        }
 
         self.write_command(Instruction::DISPON, &[])?;
 
