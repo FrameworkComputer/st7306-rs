@@ -139,101 +139,106 @@ where
     //}
 
     /// Runs commands to initialize the display.
-    pub fn init_st7306<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
     {
+        // First do a hard reset because the controller might be in a bad state
+        // if the voltage was unstable in the beginning.
         self.hard_reset(delay)?;
         self.write_command(Instruction::SWRESET, &[])?;
         delay.delay_ms(200);
 
         self.write_command(Instruction::NVMLOADCTRL, &[0x17, 0x02])?;
         self.write_command(Instruction::BSTEN, &[0x01])?;
-        // datasheet: 0x0E, 0x0A, reference: 0x08, 0x02
+
+        // Gate Voltage Control. VGH: 12V, VGL: -6V
         self.write_command(Instruction::GCTRL, &[0x08, 0x02])?;
+        // VSHP Control: 4.02V
         self.write_command(Instruction::VSHPCTRL, &[0x0B, 0x0B, 0x0B, 0x0B])?;
+        // VSLP Control: 0.8V
         self.write_command(Instruction::VSLPCTRL, &[0x23, 0x23, 0x23, 0x23])?;
+        // VSHN Control: -3.28V
         self.write_command(Instruction::VSHNCTRL, &[0x27, 0x27, 0x27, 0x27])?;
+        // VSLN Control: -0.06V
         self.write_command(Instruction::VSLNCTRL, &[0x35, 0x35, 0x35, 0x35])?;
 
         // Datasheet: 0x32, 0x03, 0x1F Reference code: not present
         //self.write_command(Instruction::GTCON, &[0x32, 0x03, 0x1F])?;
 
-        // Datasheet: 0x26, 0xE9, Reference: 0xA6, 0xE9
+        // Datasheet: 0x26, 0xE9, Reference: 0xA6, 0xE9 (HPM: 32Hz)
         self.write_command(Instruction::OSCSET, &[0xA6, 0xE9])?;
-        // Datasheet: 0x02. Reference: 0x12
+        // Frame Rate Control: 32Hz in High Power Mode, 1Hz in Low Power Mode
         self.write_command(Instruction::FRCTRL, &[0x12])?;
 
-        // Datasheet: 0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
-        // Reference: 0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
+        // HPM EQ Control
         self.write_command(
             Instruction::GTUPEQH,
             &[0xE5, 0xF6, 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45],
         )?;
-        // Datasheet: 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
-        // Reference: 0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45
+        // LPM EQ Control
         self.write_command(
             Instruction::GTUPEQL,
             &[0x05, 0x46, 0x77, 0x77, 0x77, 0x77, 0x76, 0x45],
         )?;
-        // Datasheet: 0x13, Reference: 0x13
+        // Source EQ Enable
         self.write_command(Instruction::SOUEQ, &[0x13])?;
-        // Datasheet: 0x78, Reference: 0x64 (100) 300x400 Mono
+
+        // Gate Line Setting:
+        // 0x64 (100) lines. Each line controls 2 pixels. 100*2 = 400px
         self.write_command(Instruction::GATESET, &[0x64])?;
 
+        // Exit sleep mode
         self.write_command(Instruction::SLPOUT, &[])?;
         delay.delay_ms(255);
 
-        // Ultra low power
+        // Ultra low power code (undocumented command)
         self.write_command(Instruction::LOWPOWER, &[0xC1, 0x4A, 0x26])?;
 
-        // Default: 0x00, reference code: 0x00
+        // Source Voltage Select: VSHP1, VSLP1, VSHN1, VSLN1
         self.write_command(Instruction::VSHLSEL, &[0x00])?;
 
-        // Default 0x00, manual example: 0x48/0b1001000 (MY, DO), reference code: 0x00
-        // 0b1001000 =      MY, DO
-        // 0b0001000 =        , DO
-        // 0b1001100 =      MY, DO,    GS (Seems to make it start rom the top)
-        // 0b1011000 =    , MY, DO, MV
+        // Memory Data Access Control. Default, nothing inverted
         self.write_command(Instruction::MADCTL, &[0x00])?;
 
-        // Default: 0x00, reference code: 0x10. bit 0 to enable BPS
+        // Data Format: XDE=1, BPS=1 (3 bytes for 24 bits)
         self.write_command(Instruction::DTFORM, &[0x11])?;
 
-        // Default: 0x20, reference code: 0x20
+        // Gamma Mode: Mono
         self.write_command(Instruction::GAMAMS, &[0x20])?;
 
-        // Default: 0x0A, manual example: 0b10001001(0x89), reference code: 0x29
+        // Panel Setting
+        //  01      = 1-Dot Inversion
+        //  || 10   = Frame Interval
+        //  || ||01 = One-Line Interface
+        //  || ||||
+        // 00101001 = 0x29
         self.write_command(Instruction::PNLSET, &[0x29])?;
 
+        // Column and row settings.
         // Will be overridden by each pixel write
-        // Columns 18-42 (S217-S516)
+        // Columns 18-42 (S217-S516). 25 columns, one for 12 pixels => 300px
         self.write_command(Instruction::CASET, &[0x12, 0x2A])?;
-        // Rows 0-199 (G1-G402)
+        // Rows 0-199 (G1-G402). 200 rows, one for 2 pixels => 400px
         self.write_command(Instruction::RASET, &[0x00, 0xC7])?;
 
         // Enable auto power down
-        self.write_command(Instruction::AUSOPWRCTRL, &[0xFF])?;
+        self.write_command(Instruction::AUTOPWRCTRL, &[0xFF])?;
 
         // Tearing enable on
         self.write_command(Instruction::TEON, &[])?;
 
-        // Default: off, Reference code: On
-        self.write_command(Instruction::AUSOPWRCTRL, &[0xFF])?;
-
-        // Reference mode goes into LPM here, hmm
+        // Go into low power mode
         self.write_command(Instruction::LPM, &[])?;
 
         // Invert screen colors
         if self.inverted {
             self.write_command(Instruction::INVON, &[])?;
         } else {
-            self.write_command(Instruction::INVON, &[])?;
+            self.write_command(Instruction::INVOFF, &[])?;
         }
 
         self.write_command(Instruction::DISPON, &[])?;
-
-        delay.delay_ms(255);
 
         Ok(())
     }
@@ -268,47 +273,10 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        // TODO: !!!
+        // TODO: Implement switching modes!!!
         self.write_command(Instruction::HPM, &[])?;
         self.write_command(Instruction::LPM, &[])?;
         delay.delay_ms(100);
-        Ok(())
-    }
-
-    /// Runs commands to initialize the display.
-    pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
-    where
-        DELAY: DelayMs<u8>,
-    {
-        self.init_st7306(delay)?;
-        //self.hard_reset(delay)?;
-        //self.write_command(Instruction::SWRESET, &[])?;
-        //delay.delay_ms(200);
-        //self.write_command(Instruction::SLPOUT, &[])?;
-        //delay.delay_ms(200);
-        //self.write_command(Instruction::FRMCTR1, &[0x01, 0x2C, 0x2D])?;
-        //self.write_command(Instruction::FRMCTR2, &[0x01, 0x2C, 0x2D])?;
-        //self.write_command(Instruction::FRMCTR3, &[0x01, 0x2C, 0x2D, 0x01, 0x2C, 0x2D])?;
-        //self.write_command(Instruction::INVCTR, &[0x07])?;
-        //self.write_command(Instruction::PWCTR1, &[0xA2, 0x02, 0x84])?;
-        //self.write_command(Instruction::PWCTR2, &[0xC5])?;
-        //self.write_command(Instruction::PWCTR3, &[0x0A, 0x00])?;
-        //self.write_command(Instruction::PWCTR4, &[0x8A, 0x2A])?;
-        //self.write_command(Instruction::PWCTR5, &[0x8A, 0xEE])?;
-        //self.write_command(Instruction::VMCTR1, &[0x0E])?;
-        //if self.inverted {
-        //    self.write_command(Instruction::INVON, &[])?;
-        //} else {
-        //    self.write_command(Instruction::INVOFF, &[])?;
-        //}
-        //if self.rgb {
-        //    self.write_command(Instruction::MADCTL, &[0x00])?;
-        //} else {
-        //    self.write_command(Instruction::MADCTL, &[0x08])?;
-        //}
-        //self.write_command(Instruction::COLMOD, &[0x05])?;
-        //self.write_command(Instruction::DISPON, &[])?;
-        //delay.delay_ms(200);
         Ok(())
     }
 

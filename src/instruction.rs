@@ -92,7 +92,7 @@ pub enum Instruction {
     /// ID3 Setting
     ID3SET = 0xCC,
     /// Enable Auto Power Down
-    AUSOPWRCTRL = 0xD0,
+    AUTOPWRCTRL = 0xD0,
     /// Booster Enable
     BSTEN = 0xD1,
     /// NVM Load Control
