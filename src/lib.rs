@@ -10,6 +10,11 @@ use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::blocking::spi;
 
+const ADDR_WINDOW: ((u16, u16), (u16, u16)) = (
+    (0x12, 0x2A),
+    (0x00, 0xC7),
+);
+
 /// ST7735 driver to connect to TFT displays.
 pub struct ST7735<SPI, DC, CS, RST>
 where
@@ -247,7 +252,7 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        // TODO: Detect if HPM or LPM
+        // TODO: Detect if HPM or LPM. Because if we're in LPM, we first need to go into HPM
         if true {
             //mode == HPM {
             self.write_command(Instruction::SLPIN, &[])?;
@@ -292,11 +297,12 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        // TODO: Check if same
         self.rst.set_high().map_err(|_| ())?;
         delay.delay_ms(10);
+
         self.rst.set_low().map_err(|_| ())?;
         delay.delay_ms(10);
+
         self.rst.set_high().map_err(|_| ())
     }
 
@@ -318,17 +324,18 @@ where
         self.dc.set_high().map_err(|_| ())
     }
     pub fn end_data(&mut self) -> Result<(), ()> {
-        self.cs.set_high().map_err(|_| ())?;
-        self.dc.set_low().map_err(|_| ())
+        Ok(())
+        //self.cs.set_high().map_err(|_| ())?;
+        //self.dc.set_low().map_err(|_| ())
     }
 
     pub fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
         // TODO: Check if same
-            self.cs.set_low();
+            //self.cs.set_low();
         data.iter().for_each(|d| {
             self.spi.write(&[*d as u8]);
         });
-            self.cs.set_high();
+            //self.cs.set_high();
         Ok(())
     }
 
@@ -392,19 +399,15 @@ where
 
     /// Sets the address window for the display.
     pub fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
-        // TODO: Check if same
-        let x_lower = (sx + self.dx); // / 8;
-        let x_upper = (ex + self.dx); // / 8;
-        let y_lower = (sy + self.dy); // / 8;
-        let y_upper = (ey + self.dy); // / 8;
-        self.write_command(Instruction::CASET, &[])?;
-        self.start_data()?;
-        self.write_byte_u16(x_lower)?;
-        self.write_byte_u16(x_upper)?;
-        self.write_command(Instruction::RASET, &[])?;
-        self.start_data()?;
-        self.write_byte_u16(y_lower)?;
-        self.write_byte_u16(y_upper)
+        let ((x_lower, x_upper), (y_lower, y_upper)) = ADDR_WINDOW;
+        // TODO: Check
+        let x_lower = x_lower + (sx + self.dx) / 12;
+        let x_upper = x_upper + (ex + self.dx) / 12;
+        let y_lower = y_lower + (sy + self.dy) / 2;
+        let y_upper = y_upper + (ex + self.dy) / 2;
+        self.write_command(Instruction::CASET, &[x_lower as u8, x_upper as u8])?;
+        self.write_command(Instruction::RASET, &[y_lower as u8, y_upper as u8])?;
+        Ok(())
     }
 
     /// Sets a pixel color at the given coords.
@@ -575,14 +578,37 @@ where
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         let brightness = ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8;
-        let _rgb_color = RawU16::from(color).into_inner();
-        self.set_pixels_buffered_u8(
-            0,
-            0,
-            self.width as u16 - 1,
-            self.height as u16 - 1,
-            core::iter::repeat(brightness).take((self.width * self.height) as usize),
-        )
+        let black = if brightness < 128 {0xFF} else {0x00};
+        //let _rgb_color = RawU16::from(color).into_inner();
+        //self.set_pixels_buffered_u8(
+        //    0,
+        //    0,
+        //    self.width as u16 - 1,
+        //    self.height as u16 - 1,
+        //    core::iter::repeat(brightness).take((self.width * self.height) as usize),
+        //)
+        const COL_NUM: usize = (300 / 12); // * 4 / 3;
+        const ROW_NUM: usize = 400 / 2;
+        let caset = (18, (42));
+        let raset = (0, (199));
+        self.write_command(Instruction::CASET, &[caset.0, caset.1])
+            ?;
+        self.write_command(Instruction::RASET, &[raset.0, raset.1])
+            ?;
+
+        self.write_command(Instruction::RAMWR, &[])?;
+        self.start_data()?;
+
+        // TODO: Need to flip height/width
+        for row in 0..ROW_NUM {
+            for col in 0..COL_NUM {
+                let b = [black, black, black];
+                self.write_byte(b[0])?;
+                self.write_byte(b[1])?;
+                self.write_byte(b[2])?;
+            }
+        }
+        Ok(())
     }
 }
 
