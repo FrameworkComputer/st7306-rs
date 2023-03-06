@@ -13,8 +13,8 @@ use embedded_hal::digital::v2::OutputPin;
 // TODO: Make this configurable
 const ADDR_WINDOW: ((u16, u16), (u16, u16)) = ((0x12, 0x2A), (0x00, 0xC7));
 
-/// ST7735 driver to connect to TFT displays.
-pub struct ST7735<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
+/// ST7306 driver to connect to TFT displays.
+pub struct ST7306<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -53,7 +53,7 @@ pub enum Orientation {
     LandscapeSwapped = 0xA0,
 }
 
-impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7735<SPI, DC, CS, RST, COLS, ROWS>
+impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -70,7 +70,7 @@ where
         width: u32,
         height: u32,
     ) -> Self {
-        let display = ST7735 {
+        let display = ST7306 {
             spi,
             dc,
             cs,
@@ -457,7 +457,7 @@ fn col_to_bright(color: Rgb565) -> u8 {
 #[cfg(feature = "graphics")]
 // TODO: Remove color support from here
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> DrawTarget
-    for ST7735<SPI, DC, CS, RST, COLS, ROWS>
+    for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -538,7 +538,7 @@ where
 
 #[cfg(feature = "graphics")]
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> OriginDimensions
-    for ST7735<SPI, DC, CS, RST, COLS, ROWS>
+    for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,

@@ -1,5 +1,5 @@
-# st7735-lcd-rs
+# st7306-lcd-rs
 
-This is a Rust library for displays using the ST7735 driver with embedded_graphics, embedded_hal, and no_std, no_alloc support. Documentation is available [here](https://docs.rs/st7735-lcd). Examples are [here](https://github.com/sajattack/st7735-lcd-examples)
+This is a Rust library for displays using the ST7306 driver with embedded_graphics, embedded_hal, and no_std, no_alloc support. Documentation is available [here](https://docs.rs/st7735-lcd). Examples are [here](https://github.com/FrameworkComputer/led_matrix_fw)
 
-![ferris-demo](https://i.imgur.com/T1086fn.jpg)
+TODO: Add ferris demo and take screenshot.
