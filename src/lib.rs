@@ -7,16 +7,14 @@ pub mod instruction;
 use crate::instruction::Instruction;
 
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::blocking::spi;
+use embedded_hal::digital::v2::OutputPin;
 
-const ADDR_WINDOW: ((u16, u16), (u16, u16)) = (
-    (0x12, 0x2A),
-    (0x00, 0xC7),
-);
+// TODO: Make this configurable
+const ADDR_WINDOW: ((u16, u16), (u16, u16)) = ((0x12, 0x2A), (0x00, 0xC7));
 
 /// ST7735 driver to connect to TFT displays.
-pub struct ST7735<SPI, DC, CS, RST>
+pub struct ST7735<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -38,28 +36,14 @@ where
     /// Whether the colours are inverted (true) or not (false)
     inverted: bool,
 
+    framebuffer: [[[u8; 3]; COLS]; ROWS],
+
     /// Global image offset
     dx: u16,
     dy: u16,
     width: u32,
     height: u32,
 }
-
-/// Display orientation.
-/// Bits:
-/// 0: 0
-/// 1: 0
-/// 2: Gate Scan Order, 0==Refresh Top to Bottom
-/// 3: Data Output Order, 0==Left To Right
-/// 4: 0
-/// 5: Page/Column Order, 0==Column Direction, 1==Page Direction
-/// 6: Column Address Order, 0=Left to Right
-/// 7: Page Address Order, 0==Top to Bottom
-/// bin(0x00) = '0b00000000' Portrait
-/// bin(0xC0) = '0b11000000' Portrait Swapped
-///
-/// bin(0x60) = '0b01100000' Landscape
-/// bin(0xA0) = '0b10100000' Landscape Swapped
 
 #[derive(Clone, Copy)]
 pub enum Orientation {
@@ -69,7 +53,7 @@ pub enum Orientation {
     LandscapeSwapped = 0xA0,
 }
 
-impl<SPI, DC, CS, RST> ST7735<SPI, DC, CS, RST>
+impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7735<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -77,13 +61,22 @@ where
     RST: OutputPin,
 {
     /// Creates a new driver instance that uses hardware SPI.
-    pub fn new(spi: SPI, dc: DC, cs: CS, rst: RST, inverted: bool, width: u32, height: u32) -> Self {
+    pub fn new(
+        spi: SPI,
+        dc: DC,
+        cs: CS,
+        rst: RST,
+        inverted: bool,
+        width: u32,
+        height: u32,
+    ) -> Self {
         let display = ST7735 {
             spi,
             dc,
             cs,
             rst,
             inverted,
+            framebuffer: [[[0; 3]; COLS]; ROWS],
             dx: 0,
             dy: 0,
             width,
@@ -93,45 +86,55 @@ where
         display
     }
 
-    fn clear_zoid(&mut self, color: Rgb565) -> Result<(), ()> {
-        let brightness = ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8;
-        self.set_pixels_buffered_u8(
-            0,
-            0,
-            self.width as u16 - 1,
-            self.height as u16 - 1,
-            core::iter::repeat(brightness).take((self.width * self.height) as usize),
-        )
-    }
+    // TODO: Support partial screen updates
+    //       Need to keep track of which cols and rows have changed.
+    fn flush(&mut self) -> Result<(), ()> {
+        let caset = (18, (42));
+        let raset = (0, (199));
+        self.write_command(Instruction::CASET, &[caset.0, caset.1])?;
+        self.write_command(Instruction::RASET, &[raset.0, raset.1])?;
 
-    pub fn fill_contiguous_single_color(
-        &mut self,
-        area: &Rectangle,
-        color: Rgb565,
-    ) -> Result<(), ()> {
-        // Clamp area to drawable part of the display target
-        let drawable_area = area.intersection(&Rectangle::new(Point::zero(), self.size()));
-        let brightness = col_to_bright(color);
-        let colors =
-            core::iter::repeat(brightness).take((area.size.width * area.size.height) as usize);
-        //let colors = area.points()
-        //            .filter(|pos| drawable_area.contains(*pos))
-        //            .map(|_pos| brightness);
+        self.write_command(Instruction::RAMWR, &[])?;
+        self.start_data()?;
 
-        if drawable_area.size != Size::zero() {
-            let ex = (drawable_area.top_left.x + (drawable_area.size.width - 1) as i32) as u16;
-            let ey = (drawable_area.top_left.y + (drawable_area.size.height - 1) as i32) as u16;
-            self.set_pixels_buffered_u8(
-                drawable_area.top_left.x as u16,
-                drawable_area.top_left.y as u16,
-                ex,
-                ey,
-                colors,
-            )?;
+        for row in 0..ROWS {
+            for col in 0..COLS {
+                self.write_byte(self.framebuffer[row][col][0])?;
+                self.write_byte(self.framebuffer[row][col][1])?;
+                self.write_byte(self.framebuffer[row][col][2])?;
+            }
         }
-
         Ok(())
     }
+
+    //pub fn fill_contiguous_single_color(
+    //    &mut self,
+    //    area: &Rectangle,
+    //    color: Rgb565,
+    //) -> Result<(), ()> {
+    //    // Clamp area to drawable part of the display target
+    //    let drawable_area = area.intersection(&Rectangle::new(Point::zero(), self.size()));
+    //    let brightness = col_to_bright(color);
+    //    let colors =
+    //        core::iter::repeat(brightness).take((area.size.width * area.size.height) as usize);
+    //    //let colors = area.points()
+    //    //            .filter(|pos| drawable_area.contains(*pos))
+    //    //            .map(|_pos| brightness);
+
+    //    if drawable_area.size != Size::zero() {
+    //        let ex = (drawable_area.top_left.x + (drawable_area.size.width - 1) as i32) as u16;
+    //        let ey = (drawable_area.top_left.y + (drawable_area.size.height - 1) as i32) as u16;
+    //        self.set_pixels_buffered_u8(
+    //            drawable_area.top_left.x as u16,
+    //            drawable_area.top_left.y as u16,
+    //            ex,
+    //            ey,
+    //            colors,
+    //        )?;
+    //    }
+
+    //    Ok(())
+    //}
 
     //pub fn read_did<DELAY>(&mut self, delay: &mut DELAY) -> Result<u8, ()>
     //where
@@ -204,7 +207,15 @@ where
         self.write_command(Instruction::VSHLSEL, &[0x00])?;
 
         // Memory Data Access Control. Default, nothing inverted
-        self.write_command(Instruction::MADCTL, &[0x00])?;
+        //                 0      = MY (Page Address Order) Flips picture upside down
+        //                  1     = MX (Column Address Order)
+        //                   0    = MV (Page/Column Order)
+        //                     1  = DO (Data Order)
+        //                      0 = GS (Gate Scan Order)
+        //                 010010
+        // Make sure pixel 0,0 is in the top left
+        let madctl: u8 = 0b01001000;
+        self.write_command(Instruction::MADCTL, &[madctl])?;
 
         // Data Format: XDE=1, BPS=1 (3 bytes for 24 bits)
         self.write_command(Instruction::DTFORM, &[0x11])?;
@@ -248,6 +259,15 @@ where
         Ok(())
     }
 
+    pub fn on_off(&mut self, on: bool) -> Result<(), ()> {
+        if on {
+            self.write_command(Instruction::DISPON, &[])?;
+        } else {
+            self.write_command(Instruction::DISPOFF, &[])?;
+        }
+        Ok(())
+    }
+
     pub fn sleep_in<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
@@ -278,7 +298,7 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        // TODO: Implement switching modes!!!
+        panic!("TODO: Not implemented");
         self.write_command(Instruction::HPM, &[])?;
         self.write_command(Instruction::LPM, &[])?;
         delay.delay_ms(100);
@@ -307,7 +327,6 @@ where
     }
 
     pub fn write_command(&mut self, command: Instruction, params: &[u8]) -> Result<(), ()> {
-        // TODO: Check if same
         self.cs.set_low().map_err(|_| ())?;
         self.dc.set_low().map_err(|_| ())?;
         self.spi.write(&[command as u8]).map_err(|_| ())?;
@@ -323,71 +342,21 @@ where
         self.cs.set_low().map_err(|_| ())?;
         self.dc.set_high().map_err(|_| ())
     }
-    pub fn end_data(&mut self) -> Result<(), ()> {
-        Ok(())
-        //self.cs.set_high().map_err(|_| ())?;
-        //self.dc.set_low().map_err(|_| ())
-    }
 
     pub fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
-        // TODO: Check if same
-            //self.cs.set_low();
         data.iter().for_each(|d| {
             self.spi.write(&[*d as u8]);
         });
-            //self.cs.set_high();
         Ok(())
-    }
-
-    /// Writes a data word to the display.
-    pub fn write_word(&mut self, value: u16) -> Result<(), ()> {
-        self.write_data(&value.to_be_bytes())
     }
 
     pub fn write_byte(&mut self, value: u8) -> Result<(), ()> {
         self.write_data(&[value])
     }
 
-    pub fn write_byte_u16(&mut self, value: u16) -> Result<(), ()> {
-        self.write_data(&[value as u8])
-    }
-
-    pub fn write_words_buffered(&mut self, words: impl IntoIterator<Item = u16>) -> Result<(), ()> {
-        let mut buffer = [0; 32];
-        let mut index = 0;
-        for word in words {
-            let as_bytes = word.to_be_bytes();
-            buffer[index] = as_bytes[0];
-            buffer[index + 1] = as_bytes[1];
-            index += 2;
-            if index >= buffer.len() {
-                self.write_data(&buffer)?;
-                index = 0;
-            }
-        }
-        self.write_data(&buffer[0..index])
-    }
-
-    pub fn write_words_buffered_u8(
-        &mut self,
-        words: impl IntoIterator<Item = u8>,
-    ) -> Result<(), ()> {
-        let mut buffer = [0; 32];
-        let mut index = 0;
-        for word in words {
-            buffer[index] = word;
-            index += 1;
-            if index >= buffer.len() {
-                self.write_data(&buffer)?;
-                index = 0;
-            }
-        }
-        self.write_data(&buffer[0..index])
-    }
-
     pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
-        // TODO: Check if same
-        self.write_command(Instruction::MADCTL, &[*orientation as u8 | 0x08])?;
+        panic!("TODO: Not yet implemented");
+        self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
         Ok(())
     }
 
@@ -404,91 +373,66 @@ where
         let x_lower = x_lower + (sx + self.dx) / 12;
         let x_upper = x_upper + (ex + self.dx) / 12;
         let y_lower = y_lower + (sy + self.dy) / 2;
-        let y_upper = y_upper + (ex + self.dy) / 2;
+        let y_upper = y_upper + (ey + self.dy) / 2;
         self.write_command(Instruction::CASET, &[x_lower as u8, x_upper as u8])?;
         self.write_command(Instruction::RASET, &[y_lower as u8, y_upper as u8])?;
         Ok(())
     }
 
     /// Sets a pixel color at the given coords.
-    pub fn set_pixel(&mut self, x: u16, y: u16, color: u16) -> Result<(), ()> {
-        // TODO: Check if same
-        self.set_address_window(x, y, x, y)?;
-        self.write_command(Instruction::RAMWR, &[])?;
-        self.start_data()?;
-        self.write_byte_u16(color)
-    }
-    //pub fn set_bw_pixel(&mut self, x: u16, y: u16, color: bool) -> Result<(), ()> {
-    //    // TODO: Check if same
-    //    self.set_address_window(x, y, x, y)?;
-    //    self.write_command(Instruction::RAMWR, &[])?;
-    //    self.start_data()?;
-    //    self.write_byte(color as u8)
-    //}
+    pub fn set_pixel(&mut self, x: u16, y: u16, color: u8) -> Result<(), ()> {
+        let row: usize = (y as usize) / 2;
+        let col: usize = (x as usize) / 12;
+        let black = color < 1;
 
-    /// Writes pixel colors sequentially into the current drawing window
-    pub fn write_pixels<P: IntoIterator<Item = u16>>(&mut self, colors: P) -> Result<(), ()> {
-        // TODO: Check if same
-        self.write_command(Instruction::RAMWR, &[])?;
-        self.start_data()?;
-        for color in colors {
-            self.write_byte_u16(color)?;
+        let (byte, bitmask) = match (x % 12, y % 2) {
+            (0, 0) => (0, 0x80),
+            (0, 1) => (0, 0x40),
+            (1, 0) => (0, 0x20),
+            (1, 1) => (0, 0x10),
+            (2, 0) => (0, 0x08),
+            (2, 1) => (0, 0x04),
+            (3, 0) => (0, 0x02),
+            (3, 1) => (0, 0x01),
+
+            (4, 0) => (1, 0x80),
+            (4, 1) => (1, 0x40),
+            (5, 0) => (1, 0x20),
+            (5, 1) => (1, 0x10),
+            (6, 0) => (1, 0x08),
+            (6, 1) => (1, 0x04),
+            (7, 0) => (1, 0x02),
+            (7, 1) => (1, 0x01),
+
+            (8, 0) => (2, 0x80),
+            (8, 1) => (2, 0x40),
+            (9, 0) => (2, 0x20),
+            (9, 1) => (2, 0x10),
+            (10, 0) => (2, 0x08),
+            (10, 1) => (2, 0x04),
+            (11, 0) => (2, 0x02),
+            (11, 1) => (2, 0x01),
+            _ => panic!("Impossible to reach"),
+        };
+
+        if black {
+            self.framebuffer[row][col][byte] |= bitmask
+        } else {
+            self.framebuffer[row][col][byte] &= !bitmask;
         }
         Ok(())
     }
-    pub fn write_pixels_buffered<P: IntoIterator<Item = u16>>(
-        &mut self,
-        colors: P,
-    ) -> Result<(), ()> {
+
+    /// Writes pixel colors sequentially into the current drawing window
+    pub fn write_pixels<P: IntoIterator<Item = u8>>(&mut self, colors: P) -> Result<(), ()> {
+        // TODO: Check if same
+        // Only works if writing all pixels
         self.write_command(Instruction::RAMWR, &[])?;
         self.start_data()?;
-        self.write_words_buffered(colors)
-    }
-
-    pub fn write_pixels_buffered_u8<P: IntoIterator<Item = u8>>(
-        &mut self,
-        colors: P,
-    ) -> Result<(), ()> {
-        self.write_command(Instruction::RAMWR, &[])?;
-        self.start_data()?;
-        self.write_words_buffered_u8(colors)
-    }
-
-    /// Sets pixel colors at the given drawing window
-    pub fn set_pixels<P: IntoIterator<Item = u16>>(
-        &mut self,
-        sx: u16,
-        sy: u16,
-        ex: u16,
-        ey: u16,
-        colors: P,
-    ) -> Result<(), ()> {
-        self.set_address_window(sx, sy, ex, ey)?;
-        self.write_pixels(colors)
-    }
-
-    pub fn set_pixels_buffered<P: IntoIterator<Item = u16>>(
-        &mut self,
-        sx: u16,
-        sy: u16,
-        ex: u16,
-        ey: u16,
-        colors: P,
-    ) -> Result<(), ()> {
-        self.set_address_window(sx, sy, ex, ey)?;
-        self.write_pixels_buffered(colors)
-    }
-
-    pub fn set_pixels_buffered_u8<P: IntoIterator<Item = u8>>(
-        &mut self,
-        sx: u16,
-        sy: u16,
-        ex: u16,
-        ey: u16,
-        colors: P,
-    ) -> Result<(), ()> {
-        self.set_address_window(sx, sy, ex, ey)?;
-        self.write_pixels_buffered_u8(colors)
+        for color in colors {
+            self.write_byte(color)?;
+        }
+        Ok(())
     }
 }
 
@@ -499,7 +443,7 @@ use self::embedded_graphics::{
     draw_target::DrawTarget,
     pixelcolor::{
         raw::{RawData, RawU16},
-        Rgb565,
+        Gray2, Rgb565,
     },
     prelude::*,
     primitives::Rectangle,
@@ -512,7 +456,8 @@ fn col_to_bright(color: Rgb565) -> u8 {
 
 #[cfg(feature = "graphics")]
 // TODO: Remove color support from here
-impl<SPI, DC, CS, RST> DrawTarget for ST7735<SPI, DC, CS, RST>
+impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> DrawTarget
+    for ST7735<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
@@ -536,84 +481,64 @@ where
                 self.set_pixel(
                     coord.x as u16,
                     coord.y as u16,
-                    RawU16::from(color).into_inner(),
+                    RawU16::from(color).into_inner() as u8,
                 )?;
             }
         }
 
-        Ok(())
+        self.flush()
     }
 
-    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Color>,
-    {
-        // Clamp area to drawable part of the display target
-        let drawable_area = area.intersection(&Rectangle::new(Point::zero(), self.size()));
-        let colors = area
-            .points()
-            .zip(colors)
-            .filter(|(pos, _color)| drawable_area.contains(*pos))
-            .map(|(_pos, color)| col_to_bright(color));
-        //let colors =
-        //        area.points()
-        //            .zip(colors)
-        //            .filter(|(pos, _color)| drawable_area.contains(*pos))
-        //            .map(|(_pos, color)| RawU16::from(color).into_inner());
+    //fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    //where
+    //    I: IntoIterator<Item = Self::Color>,
+    //{
+    //    // Clamp area to drawable part of the display target
+    //    let drawable_area = area.intersection(&Rectangle::new(Point::zero(), self.size()));
+    //    let colors = area
+    //        .points()
+    //        .zip(colors)
+    //        .filter(|(pos, _color)| drawable_area.contains(*pos))
+    //        .map(|(_pos, color)| col_to_bright(color));
+    //    //let colors =
+    //    //        area.points()
+    //    //            .zip(colors)
+    //    //            .filter(|(pos, _color)| drawable_area.contains(*pos))
+    //    //            .map(|(_pos, color)| RawU16::from(color).into_inner());
 
-        if drawable_area.size != Size::zero() {
-            let ex = (drawable_area.top_left.x + (drawable_area.size.width - 1) as i32) as u16;
-            let ey = (drawable_area.top_left.y + (drawable_area.size.height - 1) as i32) as u16;
-            self.set_pixels_buffered_u8(
-                drawable_area.top_left.x as u16,
-                drawable_area.top_left.y as u16,
-                ex,
-                ey,
-                colors,
-            )?;
-        }
+    //    if drawable_area.size != Size::zero() {
+    //        let ex = (drawable_area.top_left.x + (drawable_area.size.width - 1) as i32) as u16;
+    //        let ey = (drawable_area.top_left.y + (drawable_area.size.height - 1) as i32) as u16;
+    //        self.set_pixels_buffered_u8(
+    //            drawable_area.top_left.x as u16,
+    //            drawable_area.top_left.y as u16,
+    //            ex,
+    //            ey,
+    //            colors,
+    //        )?;
+    //    }
 
-        Ok(())
-    }
+    //    Ok(())
+    //}
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         let brightness = ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8;
-        let black = if brightness < 128 {0xFF} else {0x00};
-        //let _rgb_color = RawU16::from(color).into_inner();
-        //self.set_pixels_buffered_u8(
-        //    0,
-        //    0,
-        //    self.width as u16 - 1,
-        //    self.height as u16 - 1,
-        //    core::iter::repeat(brightness).take((self.width * self.height) as usize),
-        //)
-        const COL_NUM: usize = (300 / 12); // * 4 / 3;
-        const ROW_NUM: usize = 400 / 2;
-        let caset = (18, (42));
-        let raset = (0, (199));
-        self.write_command(Instruction::CASET, &[caset.0, caset.1])
-            ?;
-        self.write_command(Instruction::RASET, &[raset.0, raset.1])
-            ?;
+        let black = if brightness < 128 { 0xFF } else { 0x00 };
 
-        self.write_command(Instruction::RAMWR, &[])?;
-        self.start_data()?;
-
-        // TODO: Need to flip height/width
-        for row in 0..ROW_NUM {
-            for col in 0..COL_NUM {
-                let b = [black, black, black];
-                self.write_byte(b[0])?;
-                self.write_byte(b[1])?;
-                self.write_byte(b[2])?;
+        for col in 0..COLS {
+            for row in 0..ROWS {
+                self.framebuffer[row][col][0] = black;
+                self.framebuffer[row][col][1] = black;
+                self.framebuffer[row][col][2] = black;
             }
         }
-        Ok(())
+        self.flush()
     }
 }
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, CS, RST> OriginDimensions for ST7735<SPI, DC, CS, RST>
+impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> OriginDimensions
+    for ST7735<SPI, DC, CS, RST, COLS, ROWS>
 where
     SPI: spi::Write<u8>,
     DC: OutputPin,
