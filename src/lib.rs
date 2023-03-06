@@ -86,9 +86,33 @@ where
         display
     }
 
+    pub fn draw_pixels<I>(&mut self, pixels: I, flush: bool) -> Result<(), ()>
+    where
+        I: IntoIterator<Item = Pixel<Rgb565>>,
+    {
+        for Pixel(coord, color) in pixels.into_iter() {
+            // Only draw pixels that would be on screen
+            if coord.x >= 0
+                && coord.y >= 0
+                && coord.x < self.width as i32
+                && coord.y < self.height as i32
+            {
+                self.set_pixel(
+                    coord.x as u16,
+                    coord.y as u16,
+                    RawU16::from(color).into_inner() as u8,
+                )?;
+            }
+        }
+        if flush {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
     // TODO: Support partial screen updates
     //       Need to keep track of which cols and rows have changed.
-    fn flush(&mut self) -> Result<(), ()> {
+    pub fn flush(&mut self) -> Result<(), ()> {
         let caset = (18, (42));
         let raset = (0, (199));
         self.write_command(Instruction::CASET, &[caset.0, caset.1])?;
@@ -471,22 +495,7 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        for Pixel(coord, color) in pixels.into_iter() {
-            // Only draw pixels that would be on screen
-            if coord.x >= 0
-                && coord.y >= 0
-                && coord.x < self.width as i32
-                && coord.y < self.height as i32
-            {
-                self.set_pixel(
-                    coord.x as u16,
-                    coord.y as u16,
-                    RawU16::from(color).into_inner() as u8,
-                )?;
-            }
-        }
-
-        self.flush()
+        self.draw_pixels(pixels, true)
     }
 
     //fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
