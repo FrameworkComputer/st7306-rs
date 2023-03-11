@@ -1,4 +1,7 @@
 #![no_std]
+#![allow(clippy::result_unit_err)]
+// TODO: Make the config nicer, instead of ST7306::new with tons of arguments
+#![allow(clippy::too_many_arguments)]
 
 //! This crate provides a ST7306 driver to connect to TFT displays.
 
@@ -10,8 +13,57 @@ use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::spi;
 use embedded_hal::digital::v2::OutputPin;
 
-// TODO: Make this configurable
-const ADDR_WINDOW: ((u16, u16), (u16, u16)) = ((0x12, 0x2A), (0x00, 0xC7));
+#[derive(Debug, PartialEq, Eq)]
+pub enum PowerMode {
+    /// High Power Mode
+    Hpm,
+    /// Low Power Mode
+    Lpm,
+}
+
+const COL_MAX: u16 = 59;
+const ROW_MAX: u16 = 200;
+
+const PX_PER_COL: u16 = 12;
+const PX_PER_ROW: u16 = 2;
+
+/// Columns go from 0 to 59 (12px per col, so 720px)
+/// Rows go from 0 to 200 (2px per row, so 400px)
+struct AddrWindow {
+    col_start: u16,
+    col_end: u16,
+    row_start: u16,
+    row_end: u16,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum HpmFps {
+    Sixteen = 0b00000000,
+    ThirtyTwo = 0b00010000,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum LpmFps {
+    Quarter = 0b000,
+    Half = 0b001,
+    One = 0b010,
+    Two = 0b011,
+    Four = 0b100,
+    Eight = 0b101,
+}
+
+pub struct FpsConfig {
+    pub hpm: HpmFps,
+    pub lpm: LpmFps,
+}
+
+impl FpsConfig {
+    pub fn as_u8(&self) -> u8 {
+        (self.hpm as u8) + (self.lpm as u8)
+    }
+}
 
 /// ST7306 driver to connect to TFT displays.
 pub struct ST7306<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
@@ -38,11 +90,24 @@ where
 
     framebuffer: [[[u8; 3]; COLS]; ROWS],
 
+    /// Auto power down
+    autopowerdown: bool,
+
+    /// Enable tearing pin
+    te_enable: bool,
+
+    fps: FpsConfig,
+
     /// Global image offset
     dx: u16,
     dy: u16,
-    width: u32,
-    height: u32,
+    width: u16,
+    height: u16,
+    addr_window: AddrWindow,
+
+    sleeping: bool,
+    power_mode: PowerMode,
+    display_on: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -67,25 +132,57 @@ where
         cs: CS,
         rst: RST,
         inverted: bool,
-        width: u32,
-        height: u32,
+        autopowerdown: bool,
+        te_enable: bool,
+        fps: FpsConfig,
+        width: u16,
+        height: u16,
+        col_start: u16,
+        row_start: u16,
     ) -> Self {
-        let display = ST7306 {
+        // TODO: This might be incorrect, if the pixels don't fit exactly into cols and rows
+        // 0 indexed
+        let col_end = col_start + (width / PX_PER_COL) - 1;
+        let row_end = row_start + (height / PX_PER_ROW) - 1;
+        assert!(col_end < COL_MAX);
+        assert!(row_end < ROW_MAX);
+
+        // TODO: Remove this
+        assert_eq!(col_end, 0x2A);
+        assert_eq!(row_end, 0xC7);
+
+        let addr_window = AddrWindow {
+            col_start,
+            col_end,
+            row_start,
+            row_end,
+        };
+        ST7306 {
             spi,
             dc,
             cs,
             rst,
             inverted,
             framebuffer: [[[0; 3]; COLS]; ROWS],
+            fps,
+            autopowerdown,
+            te_enable,
             dx: 0,
             dy: 0,
             width,
             height,
-        };
-
-        display
+            sleeping: true,
+            power_mode: PowerMode::Hpm,
+            display_on: false,
+            addr_window,
+        }
     }
 
+    /// Draw individual pixels
+    ///
+    /// Since the display controller doesn't have a command to send individual
+    /// pixels, we draw it to a framebuffer and then optionally flush all of
+    /// that to the contoller.
     pub fn draw_pixels<I>(&mut self, pixels: I, flush: bool) -> Result<(), ()>
     where
         I: IntoIterator<Item = Pixel<Rgb565>>,
@@ -110,8 +207,10 @@ where
         Ok(())
     }
 
-    // TODO: Support partial screen updates
-    //       Need to keep track of which cols and rows have changed.
+    /// Flush the entire framebuffer to the screen
+    ///
+    /// TODO: Support partial screen updates
+    ///       Need to keep track of which cols and rows have changed.
     pub fn flush(&mut self) -> Result<(), ()> {
         let caset = (18, (42));
         let raset = (0, (199));
@@ -131,6 +230,7 @@ where
         Ok(())
     }
 
+    // TODO: Can implement
     //pub fn fill_contiguous_single_color(
     //    &mut self,
     //    area: &Rectangle,
@@ -160,16 +260,6 @@ where
     //    Ok(())
     //}
 
-    //pub fn read_did<DELAY>(&mut self, delay: &mut DELAY) -> Result<u8, ()>
-    //where
-    //    DELAY: DelayMs<u8>,
-    //{
-    //    self.dc.set_low().map_err(|_| ())?;
-    //    self.spi.write(command as u8).map_err(|_| ())?;
-    //    let res = self.spi.read().map_err(|_| ())?;
-    //    Ok(res)
-    //}
-
     /// Runs commands to initialize the display.
     pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
@@ -181,7 +271,10 @@ where
         self.write_command(Instruction::SWRESET, &[])?;
         delay.delay_ms(200);
 
-        self.write_command(Instruction::NVMLOADCTRL, &[0x17, 0x02])?;
+        // 0x17 = 10111 VS_EN=1, ID_EN=1 (both off would be 0b10001)
+        // 0x02 = 00010 V  NVM Load by timer=0, load by slpout=1 (both off would be 0b0)
+        //self.write_command(Instruction::NVMLOADCTRL, &[0x17, 0x02])?;
+        self.write_command(Instruction::NVMLOADCTRL, &[0b10001, 0])?;
         self.write_command(Instruction::BSTEN, &[0x01])?;
 
         // Gate Voltage Control. VGH: 12V, VGL: -6V
@@ -200,8 +293,12 @@ where
 
         // Datasheet: 0x26, 0xE9, Reference: 0xA6, 0xE9 (HPM: 32Hz)
         self.write_command(Instruction::OSCSET, &[0xA6, 0xE9])?;
+
         // Frame Rate Control: 32Hz in High Power Mode, 1Hz in Low Power Mode
-        self.write_command(Instruction::FRCTRL, &[0x12])?;
+        // Examples
+        // 0x12 = 0b10010 (32Hz in HPM, 1Hz in LPM)
+        // 0x15 = 0b10101 (32Hz in HPM, 8Hz in LPM)
+        self.write_command(Instruction::FRCTRL, &[self.fps.as_u8()])?;
 
         // HPM EQ Control
         self.write_command(
@@ -222,6 +319,7 @@ where
 
         // Exit sleep mode
         self.write_command(Instruction::SLPOUT, &[])?;
+        self.sleeping = false;
         delay.delay_ms(255);
 
         // Ultra low power code (undocumented command)
@@ -258,27 +356,45 @@ where
         // Column and row settings.
         // Will be overridden by each pixel write
         // Columns 18-42 (S217-S516). 25 columns, one for 12 pixels => 300px
-        self.write_command(Instruction::CASET, &[0x12, 0x2A])?;
+        self.write_command(
+            Instruction::CASET,
+            &[
+                self.addr_window.col_start as u8,
+                self.addr_window.col_end as u8,
+            ],
+        )?;
         // Rows 0-199 (G1-G402). 200 rows, one for 2 pixels => 400px
-        self.write_command(Instruction::RASET, &[0x00, 0xC7])?;
+        self.write_command(
+            Instruction::RASET,
+            &[
+                self.addr_window.row_start as u8,
+                self.addr_window.row_end as u8,
+            ],
+        )?;
 
         // Enable auto power down
-        self.write_command(Instruction::AUTOPWRCTRL, &[0xFF])?;
-
-        // Tearing enable on
-        self.write_command(Instruction::TEON, &[])?;
-
-        // Go into low power mode
-        self.write_command(Instruction::LPM, &[])?;
-
-        // Invert screen colors
-        if self.inverted {
-            self.write_command(Instruction::INVON, &[])?;
+        if self.autopowerdown {
+            self.write_command(Instruction::AUTOPWRCTRL, &[0xFF])?;
         } else {
-            self.write_command(Instruction::INVOFF, &[])?;
+            self.write_command(Instruction::AUTOPWRCTRL, &[0x7F])?;
         }
 
-        self.write_command(Instruction::DISPON, &[])?;
+        // Tearing enable on
+        if self.te_enable {
+            self.write_command(Instruction::TEON, &[])?;
+        } else {
+            self.write_command(Instruction::TEOFF, &[])?;
+        }
+
+        // Go into low power mode
+        //self.write_command(Instruction::LPM, &[])?;
+        self.write_command(Instruction::LPM, &[])?;
+        self.power_mode = PowerMode::Lpm;
+
+        // Invert screen colors
+        self.invert_screen(self.inverted)?;
+
+        self.on_off(true)?;
 
         Ok(())
     }
@@ -289,6 +405,7 @@ where
         } else {
             self.write_command(Instruction::DISPOFF, &[])?;
         }
+        self.display_on = on;
         Ok(())
     }
 
@@ -296,16 +413,18 @@ where
     where
         DELAY: DelayMs<u8>,
     {
-        // TODO: Detect if HPM or LPM. Because if we're in LPM, we first need to go into HPM
-        if true {
-            //mode == HPM {
-            self.write_command(Instruction::SLPIN, &[])?;
-            delay.delay_ms(100);
-        } else {
-            self.write_command(Instruction::HPM, &[])?;
-            delay.delay_ms(200);
-            self.sleep_in(delay)?;
+        match self.power_mode {
+            PowerMode::Hpm => {
+                self.write_command(Instruction::SLPIN, &[])?;
+                delay.delay_ms(100);
+            }
+            PowerMode::Lpm => {
+                self.switch_mode(delay, PowerMode::Hpm)?;
+                delay.delay_ms(255);
+                self.sleep_in(delay)?;
+            }
         }
+        self.sleeping = true;
         Ok(())
     }
 
@@ -315,26 +434,43 @@ where
     {
         self.write_command(Instruction::SLPOUT, &[])?;
         delay.delay_ms(100);
+        self.sleeping = false;
         Ok(())
     }
 
-    pub fn switch_mode<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    pub fn switch_mode<DELAY>(
+        &mut self,
+        delay: &mut DELAY,
+        target_mode: PowerMode,
+    ) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
     {
-        panic!("TODO: Not implemented");
-        self.write_command(Instruction::HPM, &[])?;
-        self.write_command(Instruction::LPM, &[])?;
-        delay.delay_ms(100);
+        if target_mode == self.power_mode {
+            return Ok(());
+        }
+        match target_mode {
+            PowerMode::Hpm => {
+                self.write_command(Instruction::HPM, &[])?;
+                delay.delay_ms(255);
+            }
+            PowerMode::Lpm => {
+                self.write_command(Instruction::LPM, &[])?;
+                delay.delay_ms(100);
+            }
+        }
+        self.power_mode = target_mode;
         Ok(())
     }
 
     pub fn invert_screen(&mut self, inverted: bool) -> Result<(), ()> {
         if inverted {
-            self.write_command(Instruction::INVON, &[])
+            self.write_command(Instruction::INVON, &[])?;
         } else {
-            self.write_command(Instruction::INVOFF, &[])
+            self.write_command(Instruction::INVOFF, &[])?;
         }
+        self.inverted = inverted;
+        Ok(())
     }
 
     pub fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
@@ -368,20 +504,29 @@ where
     }
 
     pub fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
-        data.iter().for_each(|d| {
-            self.spi.write(&[*d as u8]);
-        });
-        Ok(())
+        data.iter().fold(Ok(()), |res, byte| {
+            self.spi.write(&[*byte as u8]).map_err(|_| ())?;
+            res
+        })
+    }
+
+    pub fn write_ram(&mut self, data: &[(u8, u8, u8)]) -> Result<(), ()> {
+        data.iter().fold(Ok(()), |res, (first, second, third)| {
+            self.spi.write(&[*first as u8]).map_err(|_| ())?;
+            self.spi.write(&[*second as u8]).map_err(|_| ())?;
+            self.spi.write(&[*third as u8]).map_err(|_| ())?;
+            res
+        })
     }
 
     pub fn write_byte(&mut self, value: u8) -> Result<(), ()> {
         self.write_data(&[value])
     }
 
-    pub fn set_orientation(&mut self, orientation: &Orientation) -> Result<(), ()> {
+    pub fn set_orientation(&mut self, _orientation: &Orientation) -> Result<(), ()> {
         panic!("TODO: Not yet implemented");
-        self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
-        Ok(())
+        //self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
+        //Ok(())
     }
 
     /// Sets the global offset of the displayed image
@@ -392,24 +537,25 @@ where
 
     /// Sets the address window for the display.
     pub fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
-        let ((x_lower, x_upper), (y_lower, y_upper)) = ADDR_WINDOW;
-        // TODO: Check
-        let x_lower = x_lower + (sx + self.dx) / 12;
-        let x_upper = x_upper + (ex + self.dx) / 12;
-        let y_lower = y_lower + (sy + self.dy) / 2;
-        let y_upper = y_upper + (ey + self.dy) / 2;
+        let x_lower = self.addr_window.col_start + (sx + self.dx) / PX_PER_COL;
+        let x_upper = self.addr_window.col_end + (ex + self.dx) / PX_PER_COL;
+        let y_lower = self.addr_window.row_start + (sy + self.dy) / PX_PER_ROW;
+        let y_upper = self.addr_window.row_end + (ey + self.dy) / PX_PER_ROW;
         self.write_command(Instruction::CASET, &[x_lower as u8, x_upper as u8])?;
         self.write_command(Instruction::RASET, &[y_lower as u8, y_upper as u8])?;
         Ok(())
     }
 
     /// Sets a pixel color at the given coords.
+    ///
+    /// Changes the pixel value in the framebuffer at the bit where the
+    /// display controller expects it.
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u8) -> Result<(), ()> {
-        let row: usize = (y as usize) / 2;
-        let col: usize = (x as usize) / 12;
+        let row = (y / PX_PER_ROW) as usize;
+        let col = (x / PX_PER_COL) as usize;
         let black = color < 1;
 
-        let (byte, bitmask) = match (x % 12, y % 2) {
+        let (byte, bitmask) = match (x % PX_PER_COL, y % PX_PER_ROW) {
             (0, 0) => (0, 0x80),
             (0, 1) => (0, 0x40),
             (1, 0) => (0, 0x20),
@@ -448,6 +594,9 @@ where
     }
 
     /// Writes pixel colors sequentially into the current drawing window
+    ///
+    /// Must fill out the window, or at least write in an amount of pixels
+    /// divisible by 24.
     pub fn write_pixels<P: IntoIterator<Item = u8>>(&mut self, colors: P) -> Result<(), ()> {
         // TODO: Check if same
         // Only works if writing all pixels
@@ -467,15 +616,13 @@ use self::embedded_graphics::{
     draw_target::DrawTarget,
     pixelcolor::{
         raw::{RawData, RawU16},
-        Gray2, Rgb565,
+        Rgb565,
     },
     prelude::*,
-    primitives::Rectangle,
 };
 
 fn col_to_bright(color: Rgb565) -> u8 {
-    let brightness = ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8;
-    brightness
+    ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8
 }
 
 #[cfg(feature = "graphics")]
@@ -531,7 +678,7 @@ where
     //}
 
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
-        let brightness = ((color.r() as u16) + (color.g() as u16) + (color.b() as u16) / 3) as u8;
+        let brightness = col_to_bright(color);
         let black = if brightness < 128 { 0xFF } else { 0x00 };
 
         for col in 0..COLS {
@@ -555,6 +702,6 @@ where
     RST: OutputPin,
 {
     fn size(&self) -> Size {
-        Size::new(self.width, self.height)
+        Size::new(self.width as u32, self.height as u32)
     }
 }
