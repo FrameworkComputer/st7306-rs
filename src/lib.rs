@@ -203,10 +203,22 @@ where
     /// TODO: Support partial screen updates
     ///       Need to keep track of which cols and rows have changed.
     pub fn flush(&mut self) -> Result<(), ()> {
-        let caset = (18, (42));
-        let raset = (0, (199));
-        self.write_command(Instruction::CASET, &[caset.0, caset.1])?;
-        self.write_command(Instruction::RASET, &[raset.0, raset.1])?;
+        // TODO: Only need to set address window when doing partial updates
+        //self.write_command(
+        //    Instruction::CASET,
+        //    &[
+        //        self.addr_window.col_start as u8,
+        //        self.addr_window.col_end as u8,
+        //    ],
+        //)?;
+        //// Rows 0-199 (G1-G402). 200 rows, one for 2 pixels => 400px
+        //self.write_command(
+        //    Instruction::RASET,
+        //    &[
+        //        self.addr_window.row_start as u8,
+        //        self.addr_window.row_end as u8,
+        //    ],
+        //)?;
 
         self.write_command(Instruction::RAMWR, &[])?;
         self.start_data()?;
