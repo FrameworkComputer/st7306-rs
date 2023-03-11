@@ -98,9 +98,6 @@ where
 
     fps: FpsConfig,
 
-    /// Global image offset
-    dx: u16,
-    dy: u16,
     width: u16,
     height: u16,
     addr_window: AddrWindow,
@@ -163,8 +160,6 @@ where
             fps,
             autopowerdown,
             te_enable,
-            dx: 0,
-            dy: 0,
             width,
             height,
             sleeping: true,
@@ -523,23 +518,6 @@ where
         panic!("TODO: Not yet implemented");
         //self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
         //Ok(())
-    }
-
-    /// Sets the global offset of the displayed image
-    pub fn set_offset(&mut self, dx: u16, dy: u16) {
-        self.dx = dx;
-        self.dy = dy;
-    }
-
-    /// Sets the address window for the display.
-    pub fn set_address_window(&mut self, sx: u16, sy: u16, ex: u16, ey: u16) -> Result<(), ()> {
-        let x_lower = self.addr_window.col_start + (sx + self.dx) / PX_PER_COL;
-        let x_upper = self.addr_window.col_end + (ex + self.dx) / PX_PER_COL;
-        let y_lower = self.addr_window.row_start + (sy + self.dy) / PX_PER_ROW;
-        let y_upper = self.addr_window.row_end + (ey + self.dy) / PX_PER_ROW;
-        self.write_command(Instruction::CASET, &[x_lower as u8, x_upper as u8])?;
-        self.write_command(Instruction::RASET, &[y_lower as u8, y_upper as u8])?;
-        Ok(())
     }
 
     /// Sets a pixel color at the given coords.
