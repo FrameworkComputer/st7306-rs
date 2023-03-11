@@ -3,7 +3,15 @@
 // TODO: Make the config nicer, instead of ST7306::new with tons of arguments
 #![allow(clippy::too_many_arguments)]
 
-//! This crate provides a ST7306 driver to connect to TFT displays.
+//! This crate provides an ST7306 driver to connect to TFT displays.
+//!
+//! It uses embedded_hal to use the board's hardware SPI pin to write commands
+//! to the display.
+//!
+//! With the "graphics" feature enabled (which is the default) support for
+//! the embedded-traits crate is built-in.
+//!
+//! Currently the crate assumes a mono color display.
 
 pub mod instruction;
 
@@ -29,6 +37,7 @@ const PX_PER_ROW: u16 = 2;
 
 /// Columns go from 0 to 59 (12px per col, so 720px)
 /// Rows go from 0 to 200 (2px per row, so 400px)
+/// But if the display isn't 720x400, we need to set the actual range.
 struct AddrWindow {
     col_start: u16,
     col_end: u16,
@@ -38,6 +47,7 @@ struct AddrWindow {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// The framerate when in high power mode
 pub enum HpmFps {
     Sixteen = 0b00000000,
     ThirtyTwo = 0b00010000,
@@ -45,6 +55,7 @@ pub enum HpmFps {
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// The framerate when in low power mode
 pub enum LpmFps {
     Quarter = 0b000,
     Half = 0b001,
@@ -54,12 +65,14 @@ pub enum LpmFps {
     Eight = 0b101,
 }
 
+/// Configure the display's frame-rate in high and low-power mode
 pub struct FpsConfig {
     pub hpm: HpmFps,
     pub lpm: LpmFps,
 }
 
 impl FpsConfig {
+    /// Turn configuration into byte, as accepted by the FRCTRL command
     pub fn as_u8(&self) -> u8 {
         (self.hpm as u8) + (self.lpm as u8)
     }
@@ -88,6 +101,7 @@ where
     /// Whether the colours are inverted (true) or not (false)
     inverted: bool,
 
+    /// Internal framebuffer to keep pixels until flushing
     framebuffer: [[[u8; 3]; COLS]; ROWS],
 
     /// Auto power down
@@ -96,14 +110,23 @@ where
     /// Enable tearing pin
     te_enable: bool,
 
+    /// Frame rate configuration
     fps: FpsConfig,
 
+    /// Display width in pixels
     width: u16,
+
+    /// Display height in pixels
     height: u16,
     addr_window: AddrWindow,
 
+    /// Whether currently sleeping
     sleeping: bool,
+
+    /// Current power mode
     power_mode: PowerMode,
+
+    /// Whether the display is currently on
     display_on: bool,
 }
 
@@ -393,8 +416,7 @@ where
             self.write_command(Instruction::TEOFF, &[])?;
         }
 
-        // Go into low power mode
-        //self.write_command(Instruction::LPM, &[])?;
+        // Go into low power mode by default
         self.write_command(Instruction::LPM, &[])?;
         self.power_mode = PowerMode::Lpm;
 
@@ -406,6 +428,7 @@ where
         Ok(())
     }
 
+    /// Turn the screen on or off
     pub fn on_off(&mut self, on: bool) -> Result<(), ()> {
         if on {
             self.write_command(Instruction::DISPON, &[])?;
@@ -416,6 +439,10 @@ where
         Ok(())
     }
 
+    /// Have the display controller go into sleep mode
+    ///
+    /// Note: Must first go into HPM if currently in LPM, so after sleep_out,
+    /// if you want to be in LPM, need to manually go into LPM again.
     pub fn sleep_in<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
@@ -435,6 +462,7 @@ where
         Ok(())
     }
 
+    /// Wake the controller from sleep
     pub fn sleep_out<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
@@ -445,6 +473,7 @@ where
         Ok(())
     }
 
+    /// Switch between high and low power mode
     pub fn switch_mode<DELAY>(
         &mut self,
         delay: &mut DELAY,
@@ -470,6 +499,7 @@ where
         Ok(())
     }
 
+    /// Invert the colors on the screen
     pub fn invert_screen(&mut self, inverted: bool) -> Result<(), ()> {
         if inverted {
             self.write_command(Instruction::INVON, &[])?;
@@ -480,7 +510,8 @@ where
         Ok(())
     }
 
-    pub fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
+    /// Hard reset the controller by toggling the reset pin
+    fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
         DELAY: DelayMs<u8>,
     {
@@ -493,6 +524,9 @@ where
         self.rst.set_high().map_err(|_| ())
     }
 
+    /// Write a command with optional parameters
+    ///
+    /// This function makes sure CS and DC pins are set correctly
     pub fn write_command(&mut self, command: Instruction, params: &[u8]) -> Result<(), ()> {
         self.cs.set_low().map_err(|_| ())?;
         self.dc.set_low().map_err(|_| ())?;
@@ -505,6 +539,10 @@ where
         Ok(())
     }
 
+    /// Before writing data, the CS and DC pins must be set correctly
+    ///
+    /// This command can be used if you want to write extra data, in addition
+    /// to a command's parameters.
     pub fn start_data(&mut self) -> Result<(), ()> {
         self.cs.set_low().map_err(|_| ())?;
         self.dc.set_high().map_err(|_| ())
@@ -513,7 +551,7 @@ where
     /// Write data that's part of a command
     ///
     /// Either the command ID or the parameters.
-    pub fn write_command_data(&mut self, data: &[u8]) -> Result<(), ()> {
+    fn write_command_data(&mut self, data: &[u8]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, byte| {
             self.spi.write(&[*byte as u8]).map_err(|_| ())?;
             res
@@ -522,7 +560,11 @@ where
 
     /// Write to the display controller's RAM
     ///
-    /// Must always write in 24 bit sequences
+    /// The caller must first send a [`Instruction::RAMWR`] and can then call this
+    /// function repeatedly to fill the entire memory window.
+    ///
+    /// Must always write to RAM in 24 bit sequences, that's why the data
+    /// parameter accepts a slice of u8 triples.
     pub fn write_ram(&mut self, data: &[(u8, u8, u8)]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, (first, second, third)| {
             self.spi.write(&[*first as u8]).map_err(|_| ())?;
@@ -532,6 +574,9 @@ where
         })
     }
 
+    /// Clear the controller's RAM
+    ///
+    /// Basically turns the screen all white
     pub fn clear_ram(&mut self) -> Result<(), ()> {
         self.on_off(false)?;
         self.clear_ram_cmd(true)?;
@@ -540,6 +585,8 @@ where
     }
 
     /// Low level command, don't use if you don't know what you're doing
+    ///
+    /// Before calling this, must call [`Self::on_off()`]
     pub fn clear_ram_cmd(&mut self, clear: bool) -> Result<(), ()> {
         let byte = 0b01001111;
         let enable_clear_mask = 0b10000000;
@@ -554,6 +601,7 @@ where
         Ok(())
     }
 
+    /// Not implemented yet!
     pub fn set_orientation(&mut self, _orientation: &Orientation) -> Result<(), ()> {
         panic!("TODO: Not yet implemented");
         //self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
@@ -564,6 +612,8 @@ where
     ///
     /// Changes the pixel value in the framebuffer at the bit where the
     /// display controller expects it.
+    ///
+    /// To show it on the display, call [`Self::flush()`].
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u8) -> Result<(), ()> {
         let row = (y / PX_PER_ROW) as usize;
         let col = (x / PX_PER_COL) as usize;

@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/FrameworkComputer/st7306"
 readme = "README.md"
 documentation = "https://docs.rs/st7306-lcd"
+keywords = ["st7306", "display", "embedded-graphics", "no-std"]
 
 [dependencies]
 embedded-hal = "0.2"
