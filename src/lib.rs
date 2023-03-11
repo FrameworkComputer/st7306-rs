@@ -225,9 +225,11 @@ where
 
         for row in 0..ROWS {
             for col in 0..COLS {
-                self.write_byte(self.framebuffer[row][col][0])?;
-                self.write_byte(self.framebuffer[row][col][1])?;
-                self.write_byte(self.framebuffer[row][col][2])?;
+                self.write_ram(&[(
+                    self.framebuffer[row][col][0],
+                    self.framebuffer[row][col][1],
+                    self.framebuffer[row][col][2],
+                )])?;
             }
         }
         Ok(())
@@ -495,7 +497,7 @@ where
         self.spi.write(&[command as u8]).map_err(|_| ())?;
         if !params.is_empty() {
             self.start_data()?;
-            self.write_data(params)?;
+            self.write_command_data(params)?;
         }
         self.cs.set_high().map_err(|_| ())?;
         Ok(())
@@ -506,13 +508,19 @@ where
         self.dc.set_high().map_err(|_| ())
     }
 
-    pub fn write_data(&mut self, data: &[u8]) -> Result<(), ()> {
+    /// Write data that's part of a command
+    ///
+    /// Either the command ID or the parameters.
+    pub fn write_command_data(&mut self, data: &[u8]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, byte| {
             self.spi.write(&[*byte as u8]).map_err(|_| ())?;
             res
         })
     }
 
+    /// Write to the display controller's RAM
+    ///
+    /// Must always write in 24 bit sequences
     pub fn write_ram(&mut self, data: &[(u8, u8, u8)]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, (first, second, third)| {
             self.spi.write(&[*first as u8]).map_err(|_| ())?;
@@ -520,10 +528,6 @@ where
             self.spi.write(&[*third as u8]).map_err(|_| ())?;
             res
         })
-    }
-
-    pub fn write_byte(&mut self, value: u8) -> Result<(), ()> {
-        self.write_data(&[value])
     }
 
     pub fn set_orientation(&mut self, _orientation: &Orientation) -> Result<(), ()> {
@@ -575,21 +579,6 @@ where
             self.framebuffer[row][col][byte] |= bitmask
         } else {
             self.framebuffer[row][col][byte] &= !bitmask;
-        }
-        Ok(())
-    }
-
-    /// Writes pixel colors sequentially into the current drawing window
-    ///
-    /// Must fill out the window, or at least write in an amount of pixels
-    /// divisible by 24.
-    pub fn write_pixels<P: IntoIterator<Item = u8>>(&mut self, colors: P) -> Result<(), ()> {
-        // TODO: Check if same
-        // Only works if writing all pixels
-        self.write_command(Instruction::RAMWR, &[])?;
-        self.start_data()?;
-        for color in colors {
-            self.write_byte(color)?;
         }
         Ok(())
     }
