@@ -22,7 +22,7 @@ pub enum PowerMode {
 }
 
 const COL_MAX: u16 = 59;
-const ROW_MAX: u16 = 200;
+const ROW_MAX: u16 = 199;
 
 const PX_PER_COL: u16 = 12;
 const PX_PER_ROW: u16 = 2;
@@ -144,12 +144,8 @@ where
         // 0 indexed
         let col_end = col_start + (width / PX_PER_COL) - 1;
         let row_end = row_start + (height / PX_PER_ROW) - 1;
-        assert!(col_end < COL_MAX);
-        assert!(row_end < ROW_MAX);
-
-        // TODO: Remove this
-        assert_eq!(col_end, 0x2A);
-        assert_eq!(row_end, 0xC7);
+        assert!(col_end <= COL_MAX);
+        assert!(row_end <= ROW_MAX);
 
         let addr_window = AddrWindow {
             col_start,
