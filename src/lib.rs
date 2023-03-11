@@ -530,6 +530,28 @@ where
         })
     }
 
+    pub fn clear_ram(&mut self) -> Result<(), ()> {
+        self.on_off(false)?;
+        self.clear_ram_cmd(true)?;
+        self.on_off(true)?;
+        Ok(())
+    }
+
+    /// Low level command, don't use if you don't know what you're doing
+    pub fn clear_ram_cmd(&mut self, clear: bool) -> Result<(), ()> {
+        let byte = 0b01001111;
+        let enable_clear_mask = 0b10000000;
+
+        if clear {
+            self.write_command(Instruction::CLRAM, &[byte + enable_clear_mask])?;
+        } else {
+            // TODO: I don't know when there's a need to do this
+            self.write_command(Instruction::CLRAM, &[byte])?;
+        }
+
+        Ok(())
+    }
+
     pub fn set_orientation(&mut self, _orientation: &Orientation) -> Result<(), ()> {
         panic!("TODO: Not yet implemented");
         //self.write_command(Instruction::MADCTL, &[*orientation as u8])?;
@@ -655,6 +677,10 @@ where
     fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
         let brightness = col_to_bright(color);
         let black = if brightness < 128 { 0xFF } else { 0x00 };
+
+        if black == 0xFF {
+            return self.clear_ram();
+        }
 
         for col in 0..COLS {
             for row in 0..ROWS {
