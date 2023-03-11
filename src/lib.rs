@@ -386,7 +386,9 @@ where
 
         // Tearing enable on
         if self.te_enable {
-            self.write_command(Instruction::TEON, &[])?;
+            // 0x00 means V-blanking only
+            // 0x01 means V and H-blanking
+            self.write_command(Instruction::TEON, &[0x00])?;
         } else {
             self.write_command(Instruction::TEOFF, &[])?;
         }
