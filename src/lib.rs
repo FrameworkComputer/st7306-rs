@@ -691,7 +691,12 @@ where
     where
         I: IntoIterator<Item = Pixel<Self::Color>>,
     {
-        self.draw_pixels(pixels, true)
+        // ATTENTION!! After calling the draw functions, you have to flush.
+        // It doesn't auto flush because you might want to combine several draw
+        // operations together and flush them all at the same time. This avoids
+        // artifacts while the screen is refreshing.
+        // TODO: I think embedded-graphics has affordances for that.
+        self.draw_pixels(pixels, false)
     }
 
     //fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
