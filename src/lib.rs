@@ -66,6 +66,7 @@ pub enum LpmFps {
 }
 
 /// Configure the display's frame-rate in high and low-power mode
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FpsConfig {
     pub hpm: HpmFps,
     pub lpm: LpmFps,
