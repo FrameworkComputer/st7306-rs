@@ -21,12 +21,12 @@ use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::spi;
 use embedded_hal::digital::v2::OutputPin;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerMode {
-    /// High Power Mode
-    Hpm,
     /// Low Power Mode
     Lpm,
+    /// High Power Mode
+    Hpm,
 }
 
 const COL_MAX: u16 = 59;
@@ -76,6 +76,23 @@ impl FpsConfig {
     /// Turn configuration into byte, as accepted by the FRCTRL command
     pub fn as_u8(&self) -> u8 {
         (self.hpm as u8) + (self.lpm as u8)
+    }
+    pub fn from_u8(byte: u8) -> Option<Self> {
+        let lpm = match byte & 0b111 {
+            0b000 => LpmFps::Quarter,
+            0b001 => LpmFps::Half,
+            0b010 => LpmFps::One,
+            0b011 => LpmFps::Two,
+            0b100 => LpmFps::Four,
+            0b101 => LpmFps::Eight,
+            _ => return None,
+        };
+        let hpm = match byte & 0b00010000 {
+            0b00000000 => HpmFps::Sixteen,
+            0b00010000 => HpmFps::ThirtyTwo,
+            _ => return None,
+        };
+        Some(Self { hpm, lpm })
     }
 }
 
@@ -508,6 +525,16 @@ where
             self.write_command(Instruction::INVOFF, &[])?;
         }
         self.inverted = inverted;
+        Ok(())
+    }
+
+    /// Change the FPS config
+    ///
+    /// Note that to change to the desired FPS, you might have to switch between
+    /// low and high power modes.
+    pub fn set_fps(&mut self, fps: FpsConfig) -> Result<(), ()> {
+        self.fps = fps;
+        self.write_command(Instruction::FRCTRL, &[self.fps.as_u8()])?;
         Ok(())
     }
 
