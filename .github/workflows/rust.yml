@@ -4,12 +4,36 @@ on: [push, pull_request]
 
 jobs:
   build:
-
+    name: Building
     runs-on: ubuntu-latest
-
     steps:
-    - name: Install Target
-      run: rustup target install thumbv7em-none-eabihf
-    - uses: actions/checkout@v1
-    - name: Build
-      run: cargo build --release --target=thumbv7em-none-eabihf
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          target: thumbv6m-none-eabi
+      - name: Build
+        run: cargo build --release --target=thumbv6m-none-eabi
+
+  linting:
+    name: Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          target: thumbv6m-none-eabi
+      - run: |
+          cargo clippy --target=thumbv6m-none-eabi -- --deny=warnings
+
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          target: thumbv6m-none-eabi
+      - run: cargo fmt -- --check
