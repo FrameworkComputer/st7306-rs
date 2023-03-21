@@ -581,7 +581,7 @@ where
     /// Either the command ID or the parameters.
     fn write_command_data(&mut self, data: &[u8]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, byte| {
-            self.spi.write(&[*byte as u8]).map_err(|_| ())?;
+            self.spi.write(&[*byte]).map_err(|_| ())?;
             res
         })
     }
@@ -595,9 +595,9 @@ where
     /// parameter accepts a slice of u8 triples.
     pub fn write_ram(&mut self, data: &[(u8, u8, u8)]) -> Result<(), ()> {
         data.iter().fold(Ok(()), |res, (first, second, third)| {
-            self.spi.write(&[*first as u8]).map_err(|_| ())?;
-            self.spi.write(&[*second as u8]).map_err(|_| ())?;
-            self.spi.write(&[*third as u8]).map_err(|_| ())?;
+            self.spi.write(&[*first]).map_err(|_| ())?;
+            self.spi.write(&[*second]).map_err(|_| ())?;
+            self.spi.write(&[*third]).map_err(|_| ())?;
             res
         })
     }
