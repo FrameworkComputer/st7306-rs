@@ -1,0 +1,6 @@
+[toolchain]
+channel = "stable"
+targets = [
+    # Target used by RP2040
+    "thumbv6m-none-eabi",
+]
