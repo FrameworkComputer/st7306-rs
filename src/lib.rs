@@ -17,7 +17,7 @@ pub mod instruction;
 
 use crate::instruction::Instruction;
 
-use embedded_hal::delay::DelayUs;
+use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::OutputPin;
 use embedded_hal::spi::SpiDevice;
 
@@ -308,7 +308,7 @@ where
     /// Runs commands to initialize the display.
     pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         // First do a hard reset because the controller might be in a bad state
         // if the voltage was unstable in the beginning.
@@ -462,7 +462,7 @@ where
     /// if you want to be in LPM, need to manually go into LPM again.
     pub fn sleep_in<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         match self.power_mode {
             PowerMode::Hpm => {
@@ -482,7 +482,7 @@ where
     /// Wake the controller from sleep
     pub fn sleep_out<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         self.write_command(Instruction::SLPOUT, &[])?;
         delay.delay_ms(100);
@@ -497,7 +497,7 @@ where
         target_mode: PowerMode,
     ) -> Result<(), ()>
     where
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         if target_mode == self.power_mode {
             return Ok(());
@@ -540,7 +540,7 @@ where
     /// Hard reset the controller by toggling the reset pin
     fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayUs,
+        DELAY: DelayNs,
     {
         self.rst.set_high().map_err(|_| ())?;
         delay.delay_ms(10);
