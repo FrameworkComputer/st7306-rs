@@ -97,10 +97,11 @@ impl FpsConfig {
 }
 
 /// ST7306 driver to connect to TFT displays.
-pub struct ST7306<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
+///
+/// CS (chip select) is managed by the SpiDevice implementation.
+pub struct ST7306<SPI, DC, RST, const COLS: usize, const ROWS: usize>
 where
     DC: OutputPin,
-    CS: OutputPin,
     RST: OutputPin,
 {
     /// SPI
@@ -108,9 +109,6 @@ where
 
     /// Data/command pin.
     pub dc: DC,
-
-    /// Chip select pin
-    pub cs: CS,
 
     /// Reset pin.
     pub rst: RST,
@@ -155,18 +153,18 @@ pub enum Orientation {
     LandscapeSwapped = 0xA0,
 }
 
-impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7306<SPI, DC, CS, RST, COLS, ROWS>
+impl<SPI, DC, RST, const COLS: usize, const ROWS: usize> ST7306<SPI, DC, RST, COLS, ROWS>
 where
     SPI: SpiDevice,
     DC: OutputPin,
-    CS: OutputPin,
     RST: OutputPin,
 {
     /// Creates a new driver instance that uses hardware SPI.
+    ///
+    /// CS (chip select) is managed by the SpiDevice implementation.
     pub fn new(
         spi: SPI,
         dc: DC,
-        cs: CS,
         rst: RST,
         inverted: bool,
         autopowerdown: bool,
@@ -193,7 +191,6 @@ where
         ST7306 {
             spi,
             dc,
-            cs,
             rst,
             inverted,
             framebuffer: [[[0; 3]; COLS]; ROWS],
@@ -553,25 +550,22 @@ where
 
     /// Write a command with optional parameters
     ///
-    /// This function makes sure CS and DC pins are set correctly
+    /// CS is managed by the SpiDevice, DC is set appropriately for command/data.
     pub fn write_command(&mut self, command: Instruction, params: &[u8]) -> Result<(), ()> {
-        self.cs.set_low().map_err(|_| ())?;
         self.dc.set_low().map_err(|_| ())?;
         self.spi.write(&[command as u8]).map_err(|_| ())?;
         if !params.is_empty() {
             self.start_data()?;
             self.write_command_data(params)?;
         }
-        self.cs.set_high().map_err(|_| ())?;
         Ok(())
     }
 
-    /// Before writing data, the CS and DC pins must be set correctly
+    /// Set DC pin high for data transfer.
     ///
     /// This command can be used if you want to write extra data, in addition
     /// to a command's parameters.
     pub fn start_data(&mut self) -> Result<(), ()> {
-        self.cs.set_low().map_err(|_| ())?;
         self.dc.set_high().map_err(|_| ())
     }
 
@@ -703,12 +697,11 @@ fn col_to_bright(color: Rgb565) -> u8 {
 
 #[cfg(feature = "graphics")]
 // TODO: Remove color support from here
-impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> DrawTarget
-    for ST7306<SPI, DC, CS, RST, COLS, ROWS>
+impl<SPI, DC, RST, const COLS: usize, const ROWS: usize> DrawTarget
+    for ST7306<SPI, DC, RST, COLS, ROWS>
 where
     SPI: SpiDevice,
     DC: OutputPin,
-    CS: OutputPin,
     RST: OutputPin,
 {
     type Error = ();
@@ -778,12 +771,11 @@ where
 }
 
 #[cfg(feature = "graphics")]
-impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> OriginDimensions
-    for ST7306<SPI, DC, CS, RST, COLS, ROWS>
+impl<SPI, DC, RST, const COLS: usize, const ROWS: usize> OriginDimensions
+    for ST7306<SPI, DC, RST, COLS, ROWS>
 where
     SPI: SpiDevice,
     DC: OutputPin,
-    CS: OutputPin,
     RST: OutputPin,
 {
     fn size(&self) -> Size {
