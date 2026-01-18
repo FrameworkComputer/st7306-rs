@@ -17,9 +17,9 @@ pub mod instruction;
 
 use crate::instruction::Instruction;
 
-use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::blocking::spi;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::delay::DelayNs;
+use embedded_hal::digital::OutputPin;
+use embedded_hal::spi::SpiDevice;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerMode {
@@ -99,7 +99,6 @@ impl FpsConfig {
 /// ST7306 driver to connect to TFT displays.
 pub struct ST7306<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize>
 where
-    SPI: spi::Write<u8>,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
@@ -158,7 +157,7 @@ pub enum Orientation {
 
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: spi::Write<u8>,
+    SPI: SpiDevice,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
@@ -309,7 +308,7 @@ where
     /// Runs commands to initialize the display.
     pub fn init<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayMs<u8>,
+        DELAY: DelayNs,
     {
         // First do a hard reset because the controller might be in a bad state
         // if the voltage was unstable in the beginning.
@@ -463,7 +462,7 @@ where
     /// if you want to be in LPM, need to manually go into LPM again.
     pub fn sleep_in<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayMs<u8>,
+        DELAY: DelayNs,
     {
         match self.power_mode {
             PowerMode::Hpm => {
@@ -483,7 +482,7 @@ where
     /// Wake the controller from sleep
     pub fn sleep_out<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayMs<u8>,
+        DELAY: DelayNs,
     {
         self.write_command(Instruction::SLPOUT, &[])?;
         delay.delay_ms(100);
@@ -498,7 +497,7 @@ where
         target_mode: PowerMode,
     ) -> Result<(), ()>
     where
-        DELAY: DelayMs<u8>,
+        DELAY: DelayNs,
     {
         if target_mode == self.power_mode {
             return Ok(());
@@ -541,7 +540,7 @@ where
     /// Hard reset the controller by toggling the reset pin
     fn hard_reset<DELAY>(&mut self, delay: &mut DELAY) -> Result<(), ()>
     where
-        DELAY: DelayMs<u8>,
+        DELAY: DelayNs,
     {
         self.rst.set_high().map_err(|_| ())?;
         delay.delay_ms(10);
@@ -580,9 +579,9 @@ where
     ///
     /// Either the command ID or the parameters.
     fn write_command_data(&mut self, data: &[u8]) -> Result<(), ()> {
-        data.iter().fold(Ok(()), |res, byte| {
+        data.iter().try_fold((), |res, byte| {
             self.spi.write(&[*byte]).map_err(|_| ())?;
-            res
+            Ok(res)
         })
     }
 
@@ -594,11 +593,11 @@ where
     /// Must always write to RAM in 24 bit sequences, that's why the data
     /// parameter accepts a slice of u8 triples.
     pub fn write_ram(&mut self, data: &[(u8, u8, u8)]) -> Result<(), ()> {
-        data.iter().fold(Ok(()), |res, (first, second, third)| {
+        data.iter().try_fold((), |res, (first, second, third)| {
             self.spi.write(&[*first]).map_err(|_| ())?;
             self.spi.write(&[*second]).map_err(|_| ())?;
             self.spi.write(&[*third]).map_err(|_| ())?;
-            res
+            Ok(res)
         })
     }
 
@@ -707,7 +706,7 @@ fn col_to_bright(color: Rgb565) -> u8 {
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> DrawTarget
     for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: spi::Write<u8>,
+    SPI: SpiDevice,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
@@ -782,7 +781,7 @@ where
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> OriginDimensions
     for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: spi::Write<u8>,
+    SPI: SpiDevice,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
