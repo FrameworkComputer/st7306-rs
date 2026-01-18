@@ -19,7 +19,7 @@ use crate::instruction::Instruction;
 
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::OutputPin;
-use embedded_hal::spi::SpiDevice;
+use embedded_hal::spi::SpiBus;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerMode {
@@ -157,7 +157,7 @@ pub enum Orientation {
 
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: SpiDevice,
+    SPI: SpiBus,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
@@ -706,7 +706,7 @@ fn col_to_bright(color: Rgb565) -> u8 {
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> DrawTarget
     for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: SpiDevice,
+    SPI: SpiBus,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
@@ -781,7 +781,7 @@ where
 impl<SPI, DC, CS, RST, const COLS: usize, const ROWS: usize> OriginDimensions
     for ST7306<SPI, DC, CS, RST, COLS, ROWS>
 where
-    SPI: SpiDevice,
+    SPI: SpiBus,
     DC: OutputPin,
     CS: OutputPin,
     RST: OutputPin,
